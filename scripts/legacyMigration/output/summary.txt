@@ -1,0 +1,18 @@
+1. 갑지 | sections=7 pages=94 scriptChars=7938
+2. Part 1: 시장 # 1, 시장현황 | sections=1 pages=1 scriptChars=1271
+3. ------------------------------... | sections=1 pages=1 scriptChars=10871
+4. 1. 오프닝 | sections=1 pages=1 scriptChars=9093
+5. 오프닝 | sections=14 pages=100 scriptChars=7413
+6. 1. 갑지 | sections=1 pages=1 scriptChars=9938
+7. Part 1. 사업환경 | sections=1 pages=1 scriptChars=4357
+8. 1. 갑지 | sections=1 pages=1 scriptChars=1481
+9. 게-----------------------------... | sections=1 pages=1 scriptChars=8435
+10. ------------------------------... | sections=1 pages=1 scriptChars=8671
+11. 오프닝 | sections=9 pages=54 scriptChars=4859
+12. 파트 1. 가격 | sections=1 pages=1 scriptChars=3788
+13. 내정된 분양가 @1,540만원 | sections=3 pages=34 scriptChars=4506
+14. 1. 제목 없음 | sections=1 pages=1 scriptChars=5122
+15. 진주 평거센트럴 메모 | sections=1 pages=1 scriptChars=5888
+16. 진주 평거센트럴 | sections=10 pages=88 scriptChars=6788
+17. 지레퍼런스 페이지 | sections=1 pages=1 scriptChars=364
+18. 1. 시작 갑지 | sections=1 pages=1 scriptChars=8246
