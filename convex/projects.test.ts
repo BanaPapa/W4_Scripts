@@ -63,3 +63,77 @@ describe("projects trash", () => {
     expect(active.length).toBeGreaterThan(0);
   });
 });
+
+describe("projects hierarchy", () => {
+  test("create stores kind/parentId and gives siblings an incrementing order", async () => {
+    const t = convexTest(schema, modules);
+    const categoryId = await t.mutation(api.projects.create, {
+      name: "분류",
+      siteName: "",
+      labelColor: "blue",
+      kind: "category"
+    });
+    const firstChild = await t.mutation(api.projects.create, {
+      name: "A",
+      siteName: "",
+      labelColor: "green",
+      kind: "script",
+      parentId: categoryId
+    });
+    const secondChild = await t.mutation(api.projects.create, {
+      name: "B",
+      siteName: "",
+      labelColor: "green",
+      kind: "memo",
+      parentId: categoryId
+    });
+
+    const list = await t.query(api.projects.list, {});
+    const a = list.find((project) => project._id === firstChild);
+    const b = list.find((project) => project._id === secondChild);
+
+    expect(a?.parentId).toBe(categoryId);
+    expect(a?.kind).toBe("script");
+    expect(b?.kind).toBe("memo");
+    expect(b?.order ?? 0).toBeGreaterThan(a?.order ?? 0);
+  });
+
+  test("reorderProjects reparents into a category and back out to the root", async () => {
+    const t = convexTest(schema, modules);
+    const categoryId = await t.mutation(api.projects.create, {
+      name: "분류",
+      siteName: "",
+      labelColor: "blue",
+      kind: "category"
+    });
+    const projectId = await t.mutation(api.projects.create, sampleProject({ name: "이동 대상" }));
+
+    await t.mutation(api.projects.reorderProjects, {
+      movedId: projectId,
+      parentId: categoryId,
+      orderedIds: [projectId]
+    });
+    let list = await t.query(api.projects.list, {});
+    expect(list.find((project) => project._id === projectId)?.parentId).toBe(categoryId);
+    expect(list.find((project) => project._id === projectId)?.order).toBe(0);
+
+    await t.mutation(api.projects.reorderProjects, { movedId: projectId, orderedIds: [projectId] });
+    list = await t.query(api.projects.list, {});
+    expect(list.find((project) => project._id === projectId)?.parentId).toBeUndefined();
+  });
+
+  test("updateMemoText persists the memo body", async () => {
+    const t = convexTest(schema, modules);
+    const id = await t.mutation(api.projects.create, {
+      name: "메모",
+      siteName: "",
+      labelColor: "green",
+      kind: "memo"
+    });
+
+    await t.mutation(api.projects.updateMemoText, { id, memoText: "회의록 내용" });
+
+    const list = await t.query(api.projects.list, {});
+    expect(list.find((project) => project._id === id)?.memoText).toBe("회의록 내용");
+  });
+});

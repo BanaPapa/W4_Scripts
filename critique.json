@@ -1,0 +1,26 @@
+{
+  "kind": "critique-panel",
+  "score": 4,
+  "axes": {
+    "philosophy": {
+      "score": 4,
+      "notes": "Notion-style text-first product UI, white/gray base, one controlled accent, no marketing-page drift."
+    },
+    "hierarchy": {
+      "score": 4,
+      "notes": "Each screen has a clear primary work area: folders, page tree/editor, export preview, rehearsal script, memo editor."
+    },
+    "execution": {
+      "score": 4,
+      "notes": "Responsive breakpoints, readable line heights, accessible labels, and syntax-checked scripts are in place."
+    },
+    "specificity": {
+      "score": 4,
+      "notes": "Copy, sample projects, sections, pages, exports, rehearsal controls, and memos are specific to PT Script Manager."
+    },
+    "restraint": {
+      "score": 4,
+      "notes": "Neutral surfaces dominate; accent is reserved for active states, status cues, and primary actions."
+    }
+  }
+}

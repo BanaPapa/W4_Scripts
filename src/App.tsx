@@ -5,6 +5,7 @@ import {
   Download,
   FileSpreadsheet,
   FileText,
+  Folder,
   GripVertical,
   LayoutGrid,
   List,
@@ -18,6 +19,7 @@ import {
   Search,
   Settings,
   Star,
+  StickyNote,
   Sun,
   Trash2
 } from "lucide-react";
@@ -25,8 +27,9 @@ import { CSSProperties, DragEvent, FormEvent, MouseEvent, useEffect, useMemo, us
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import type { LabelColor, MemoKind, Project, ScriptPage, View } from "./types";
+import type { LabelColor, MemoKind, Project, ProjectKind, ScriptPage, View } from "./types";
 import {
+  descendantProjectIds,
   downloadText,
   estimateSeconds,
   exportXlsx,
@@ -34,8 +37,15 @@ import {
   formatDate,
   formatDuration,
   makeMarkdown,
-  pageWord
+  pageWord,
+  projectChildren
 } from "./utils";
+
+const projectKindMeta: Record<ProjectKind, { label: string; description: string }> = {
+  script: { label: "스크립트 폴더", description: "구획과 페이지로 발표 원고를 작성합니다." },
+  category: { label: "분류 폴더", description: "다른 폴더를 안에 담아 정리합니다." },
+  memo: { label: "메모 폴더", description: "구획 없이 단일 메모 텍스트만 기록합니다." }
+};
 
 const UI_STORAGE_KEY = "pt-script-manager-ui-v1";
 
@@ -184,6 +194,10 @@ function mapProjectDoc(doc: {
   projectMemos: Project["projectMemos"];
   sections: Project["sections"];
   deletedAt?: string;
+  kind?: ProjectKind;
+  parentId?: Id<"projects">;
+  order?: number;
+  memoText?: string;
 }): Project {
   return {
     id: doc._id,
@@ -194,7 +208,11 @@ function mapProjectDoc(doc: {
     updatedAt: doc.updatedAt,
     projectMemos: doc.projectMemos,
     sections: doc.sections,
-    deletedAt: doc.deletedAt
+    deletedAt: doc.deletedAt,
+    kind: doc.kind ?? "script",
+    parentId: doc.parentId,
+    order: doc.order ?? 0,
+    memoText: doc.memoText ?? ""
   };
 }
 
@@ -208,6 +226,8 @@ export default function App() {
   const restoreProjectMutation = useMutation(api.projects.restore);
   const permanentlyDeleteProjectMutation = useMutation(api.projects.permanentlyDelete);
   const patchProjectMutation = useMutation(api.projects.patch);
+  const reorderProjectsMutation = useMutation(api.projects.reorderProjects);
+  const updateMemoTextMutation = useMutation(api.projects.updateMemoText);
   const seedIfEmptyMutation = useMutation(api.projects.seedIfEmpty);
 
   const projects: Project[] = useMemo(() => (projectsQuery ?? []).map(mapProjectDoc), [projectsQuery]);
@@ -218,6 +238,8 @@ export default function App() {
   const [selectedPageId, setSelectedPageId] = useState("");
   const [uiSettings, setUISettings] = useState<UISettings>(loadUISettings);
   const [resizingNav, setResizingNav] = useState(false);
+  const [expandedProjectIds, setExpandedProjectIds] = useState<Set<Id<"projects">>>(new Set());
+  const [createFolder, setCreateFolder] = useState<{ parentId?: Id<"projects"> } | null>(null);
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
 
@@ -271,6 +293,7 @@ export default function App() {
     setActiveProjectId(projectId);
     setSelectedPageId(project?.sections[0]?.pages[0]?.id ?? "");
     setView("project");
+    setExpandedProjectIds((current) => new Set(current).add(projectId));
   }
 
   function openSearchResult(projectId: Id<"projects">, pageId: string) {
@@ -285,6 +308,25 @@ export default function App() {
     setActiveProjectId(projectId);
     setSelectedPageId(pageId);
     setView("project");
+    setExpandedProjectIds((current) => new Set(current).add(projectId));
+  }
+
+  function toggleProjectExpanded(projectId: Id<"projects">) {
+    setExpandedProjectIds((current) => {
+      const next = new Set(current);
+      if (next.has(projectId)) next.delete(projectId);
+      else next.add(projectId);
+      return next;
+    });
+  }
+
+  function toggleTreeSection(projectId: Id<"projects">, sectionId: string) {
+    updateProject(projectId, (project) => ({
+      ...project,
+      sections: project.sections.map((section) =>
+        section.id === sectionId ? { ...section, collapsed: !section.collapsed } : section
+      )
+    }));
   }
 
   function toggleTheme() {
@@ -294,12 +336,31 @@ export default function App() {
     });
   }
 
-  async function handleCreateProject(input: { name: string; siteName: string; labelColor: LabelColor }) {
-    return await createProjectMutation(input);
-  }
-
   function handleEditProject(id: Id<"projects">, input: { name: string; siteName: string; labelColor: LabelColor }) {
     updateMetaMutation({ id, ...input });
+  }
+
+  async function submitCreateFolder(input: {
+    name: string;
+    siteName: string;
+    labelColor: LabelColor;
+    kind: ProjectKind;
+  }) {
+    const parentId = createFolder?.parentId;
+    const newId = await createProjectMutation({ ...input, parentId });
+    setCreateFolder(null);
+    if (parentId) {
+      setExpandedProjectIds((current) => new Set(current).add(parentId));
+    }
+    openProject(newId);
+  }
+
+  function handleMoveProject(
+    movedId: Id<"projects">,
+    parentId: Id<"projects"> | undefined,
+    orderedIds: Id<"projects">[]
+  ) {
+    reorderProjectsMutation({ movedId, parentId, orderedIds });
   }
 
   function handleDeleteProject(id: Id<"projects">) {
@@ -423,12 +484,22 @@ export default function App() {
         onSettingsChange={setUISettings}
         onNavigate={setView}
         onResizeStart={() => setResizingNav(true)}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        selectedPageId={selectedPageId}
+        expandedProjectIds={expandedProjectIds}
+        onToggleProjectExpanded={toggleProjectExpanded}
+        onToggleTreeSection={toggleTreeSection}
+        onOpenProject={openProject}
+        onSelectTreePage={openSearchResult}
+        onMoveProject={handleMoveProject}
+        onRequestCreate={(parentId) => setCreateFolder({ parentId })}
       />
       <main className="main-area">
         {view === "home" && (
           <Home
             projects={projects}
-            onCreateProject={handleCreateProject}
+            onRequestCreate={() => setCreateFolder({})}
             onEditProject={handleEditProject}
             onDeleteProject={handleDeleteProject}
             onToggleFavorite={handleToggleFavorite}
@@ -438,7 +509,22 @@ export default function App() {
             onOpenTrash={() => setView("trash")}
           />
         )}
-        {view === "project" && (
+        {view === "project" && activeProject.kind === "memo" && (
+          <MemoDetail
+            project={activeProject}
+            onUpdateMemoText={(memoText) => updateMemoTextMutation({ id: activeProject.id, memoText })}
+            onNavigate={setView}
+          />
+        )}
+        {view === "project" && activeProject.kind === "category" && (
+          <CategoryDetail
+            project={activeProject}
+            childProjects={projectChildren(projects, activeProject.id)}
+            onOpenProject={openProject}
+            onRequestCreate={(parentId) => setCreateFolder({ parentId })}
+          />
+        )}
+        {view === "project" && activeProject.kind === "script" && (
           <ProjectDetail
             project={activeProject}
             selectedPageId={selectedPageId}
@@ -464,6 +550,17 @@ export default function App() {
           />
         )}
       </main>
+      {createFolder && (
+        <CreateFolderModal
+          parentName={
+            createFolder.parentId
+              ? projects.find((project) => project.id === createFolder.parentId)?.name
+              : undefined
+          }
+          onClose={() => setCreateFolder(null)}
+          onSubmit={submitCreateFolder}
+        />
+      )}
     </div>
   );
 }
@@ -525,26 +622,266 @@ function TrashView({
   );
 }
 
+type DropMode = "before" | "after" | "inside";
+
+interface DropPlan {
+  parentId: Id<"projects"> | undefined;
+  orderedIds: Id<"projects">[];
+}
+
+interface NavCtx {
+  projects: Project[];
+  view: View;
+  activeProjectId: Id<"projects"> | "";
+  selectedPageId: string;
+  expandedProjectIds: Set<Id<"projects">>;
+  dragId: Id<"projects"> | null;
+  drop: { id: Id<"projects">; mode: DropMode } | null;
+  onToggleProjectExpanded: (id: Id<"projects">) => void;
+  onToggleTreeSection: (projectId: Id<"projects">, sectionId: string) => void;
+  onOpenProject: (id: Id<"projects">) => void;
+  onSelectTreePage: (projectId: Id<"projects">, pageId: string) => void;
+  onRequestCreate: (parentId?: Id<"projects">) => void;
+  onRowDragStart: (project: Project, event: DragEvent<HTMLElement>) => void;
+  onRowDragOver: (project: Project, event: DragEvent<HTMLElement>) => void;
+  onRowDrop: (project: Project, event: DragEvent<HTMLElement>) => void;
+  onRowDragEnd: () => void;
+}
+
+function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
+  const expanded = ctx.expandedProjectIds.has(project.id);
+  const isActive = project.id === ctx.activeProjectId && ctx.view === "project";
+  const canExpand = project.kind === "category" || project.kind === "script";
+  const dropClass = ctx.drop && ctx.drop.id === project.id ? `drop-${ctx.drop.mode}` : "";
+  const KindIcon = project.kind === "category" ? Folder : project.kind === "memo" ? StickyNote : FileText;
+  const children = project.kind === "category" ? projectChildren(ctx.projects, project.id) : [];
+
+  return (
+    <div className="nav-tree-project">
+      <div
+        className={`nav-tree-project-head ${isActive ? "active" : ""} ${
+          ctx.dragId === project.id ? "dragging" : ""
+        } ${dropClass}`}
+        draggable
+        onDragStart={(event) => ctx.onRowDragStart(project, event)}
+        onDragOver={(event) => ctx.onRowDragOver(project, event)}
+        onDrop={(event) => ctx.onRowDrop(project, event)}
+        onDragEnd={ctx.onRowDragEnd}
+        title={project.name}
+      >
+        {canExpand ? (
+          <button
+            type="button"
+            className="tree-caret"
+            onClick={(event) => {
+              event.stopPropagation();
+              ctx.onToggleProjectExpanded(project.id);
+            }}
+            aria-label={expanded ? "접기" : "펼치기"}
+          >
+            <ChevronDown size={13} className={expanded ? "" : "rotated"} />
+          </button>
+        ) : (
+          <span className="tree-caret spacer" />
+        )}
+        <span className={`label-strip ${project.labelColor}`} />
+        <KindIcon size={14} className="nav-kind-icon" />
+        <button type="button" className="nav-tree-project-label" onClick={() => ctx.onOpenProject(project.id)}>
+          {project.name}
+        </button>
+        {project.kind === "category" && (
+          <button
+            type="button"
+            className="tree-add"
+            onClick={(event) => {
+              event.stopPropagation();
+              ctx.onRequestCreate(project.id);
+            }}
+            aria-label="하위 폴더 추가"
+          >
+            <Plus size={13} />
+          </button>
+        )}
+      </div>
+
+      {expanded && project.kind === "category" && children.length > 0 && (
+        <div className="nav-children">
+          {children.map((child) => (
+            <NavProjectNode key={child.id} project={child} ctx={ctx} />
+          ))}
+        </div>
+      )}
+
+      {expanded && project.kind === "script" && (
+        <div className="nav-children">
+          {project.sections.map((section) => (
+            <div key={section.id} className="nav-tree-section">
+              <button
+                type="button"
+                className="nav-tree-section-head"
+                onClick={() => ctx.onToggleTreeSection(project.id, section.id)}
+                title={section.title}
+              >
+                <ChevronDown size={12} className={section.collapsed ? "rotated" : ""} />
+                <span className="nav-tree-section-label">{section.title}</span>
+              </button>
+              {!section.collapsed &&
+                section.pages.map((page) => (
+                  <button
+                    key={page.id}
+                    type="button"
+                    className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""}`}
+                    onClick={() => ctx.onSelectTreePage(project.id, page.id)}
+                    title={pageWord(page)}
+                  >
+                    {pageWord(page)}
+                  </button>
+                ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Sidebar({
   view,
   settings,
   onSettingsChange,
   onNavigate,
-  onResizeStart
+  onResizeStart,
+  projects,
+  activeProjectId,
+  selectedPageId,
+  expandedProjectIds,
+  onToggleProjectExpanded,
+  onToggleTreeSection,
+  onOpenProject,
+  onSelectTreePage,
+  onMoveProject,
+  onRequestCreate
 }: {
   view: View;
   settings: UISettings;
   onSettingsChange: (settings: UISettings | ((settings: UISettings) => UISettings)) => void;
   onNavigate: (view: View) => void;
   onResizeStart: () => void;
+  projects: Project[];
+  activeProjectId: Id<"projects"> | "";
+  selectedPageId: string;
+  expandedProjectIds: Set<Id<"projects">>;
+  onToggleProjectExpanded: (projectId: Id<"projects">) => void;
+  onToggleTreeSection: (projectId: Id<"projects">, sectionId: string) => void;
+  onOpenProject: (projectId: Id<"projects">) => void;
+  onSelectTreePage: (projectId: Id<"projects">, pageId: string) => void;
+  onMoveProject: (
+    movedId: Id<"projects">,
+    parentId: Id<"projects"> | undefined,
+    orderedIds: Id<"projects">[]
+  ) => void;
+  onRequestCreate: (parentId?: Id<"projects">) => void;
 }) {
   const items: Array<{ view: View; label: string }> = [
     { view: "home", label: "홈" },
-    { view: "project", label: "프로젝트 상세" },
     { view: "export", label: "내보내기" },
     { view: "memos", label: "메모" },
     { view: "settings", label: "설정" }
   ];
+
+  const [dragId, setDragId] = useState<Id<"projects"> | null>(null);
+  const [drop, setDrop] = useState<{ id: Id<"projects">; mode: DropMode } | null>(null);
+
+  const forbidden = useMemo(() => {
+    if (!dragId) return new Set<string>();
+    return new Set<string>([dragId, ...descendantProjectIds(projects, dragId)]);
+  }, [dragId, projects]);
+
+  function computeDropPlan(target: Project, mode: DropMode): DropPlan | null {
+    if (!dragId || dragId === target.id) return null;
+    if (mode === "inside") {
+      if (target.kind !== "category" || forbidden.has(target.id)) return null;
+      const kids = projectChildren(projects, target.id).filter((child) => child.id !== dragId);
+      return { parentId: target.id, orderedIds: [...kids.map((child) => child.id), dragId] };
+    }
+    const parentId = target.parentId;
+    if (parentId && forbidden.has(parentId)) return null;
+    const siblings = projectChildren(projects, parentId).filter((sibling) => sibling.id !== dragId);
+    const index = siblings.findIndex((sibling) => sibling.id === target.id);
+    if (index < 0) return null;
+    const insertAt = mode === "after" ? index + 1 : index;
+    const orderedIds = siblings.map((sibling) => sibling.id);
+    orderedIds.splice(insertAt, 0, dragId);
+    return { parentId, orderedIds };
+  }
+
+  function onRowDragStart(project: Project, event: DragEvent<HTMLElement>) {
+    event.stopPropagation();
+    setDragId(project.id);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", project.id);
+  }
+
+  function onRowDragOver(project: Project, event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!dragId || dragId === project.id) {
+      setDrop(null);
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const offset = event.clientY - rect.top;
+    const height = rect.height || 1;
+    let mode: DropMode;
+    if (project.kind === "category") {
+      mode = offset < height * 0.3 ? "before" : offset > height * 0.7 ? "after" : "inside";
+    } else {
+      mode = offset < height / 2 ? "before" : "after";
+    }
+    if (!computeDropPlan(project, mode)) {
+      setDrop(null);
+      return;
+    }
+    setDrop({ id: project.id, mode });
+  }
+
+  function onRowDrop(project: Project, event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (dragId && drop && drop.id === project.id) {
+      const plan = computeDropPlan(project, drop.mode);
+      if (plan) onMoveProject(dragId, plan.parentId, plan.orderedIds);
+    }
+    setDragId(null);
+    setDrop(null);
+  }
+
+  function onRowDragEnd() {
+    setDragId(null);
+    setDrop(null);
+  }
+
+  const ctx: NavCtx = {
+    projects,
+    view,
+    activeProjectId,
+    selectedPageId,
+    expandedProjectIds,
+    dragId,
+    drop,
+    onToggleProjectExpanded,
+    onToggleTreeSection,
+    onOpenProject,
+    onSelectTreePage,
+    onRequestCreate,
+    onRowDragStart,
+    onRowDragOver,
+    onRowDrop,
+    onRowDragEnd
+  };
+
+  const roots = projectChildren(projects, undefined);
+
   return (
     <aside className={`sidebar ${settings.navCollapsed ? "collapsed" : ""}`}>
       <div className="sidebar-top">
@@ -573,7 +910,30 @@ function Sidebar({
           </button>
         ))}
       </nav>
-      {!settings.navCollapsed && <div className="resize-handle" onMouseDown={onResizeStart} role="separator" aria-label="네비게이션 폭 조절" />}
+      {!settings.navCollapsed && (
+        <>
+          <div className="nav-tree-header">
+            <span>폴더</span>
+            <button
+              type="button"
+              className="tree-add"
+              onClick={() => onRequestCreate()}
+              aria-label="새 폴더 만들기"
+              title="새 폴더 만들기"
+            >
+              <Plus size={15} />
+            </button>
+          </div>
+          <nav className="nav-tree" aria-label="프로젝트 탐색">
+            {roots.map((project) => (
+              <NavProjectNode key={project.id} project={project} ctx={ctx} />
+            ))}
+          </nav>
+        </>
+      )}
+      {!settings.navCollapsed && (
+        <div className="resize-handle" onMouseDown={onResizeStart} role="separator" aria-label="네비게이션 폭 조절" />
+      )}
     </aside>
   );
 }
@@ -657,7 +1017,7 @@ function GlobalSearch({
 
 function Home({
   projects,
-  onCreateProject,
+  onRequestCreate,
   onEditProject,
   onDeleteProject,
   onToggleFavorite,
@@ -667,7 +1027,7 @@ function Home({
   onOpenTrash
 }: {
   projects: Project[];
-  onCreateProject: (input: { name: string; siteName: string; labelColor: LabelColor }) => Promise<Id<"projects">>;
+  onRequestCreate: () => void;
   onEditProject: (id: Id<"projects">, input: { name: string; siteName: string; labelColor: LabelColor }) => void;
   onDeleteProject: (id: Id<"projects">) => void;
   onToggleFavorite: (id: Id<"projects">) => void;
@@ -680,10 +1040,9 @@ function Home({
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [mode, setMode] = useState<"grid" | "list">("grid");
   const [editing, setEditing] = useState<Project | null>(null);
-  const [formOpen, setFormOpen] = useState(false);
   const [folderForm, setFolderForm] = useState({
-    name: "여의도 업무지구 제안 발표",
-    siteName: "여의도 금융업무 권역",
+    name: "",
+    siteName: "",
     labelColor: "green" as LabelColor
   });
 
@@ -698,16 +1057,6 @@ function Home({
       });
   }, [projects, query, sort]);
 
-  function openCreate() {
-    setEditing(null);
-    setFolderForm({
-      name: "여의도 업무지구 제안 발표",
-      siteName: "여의도 금융업무 권역",
-      labelColor: "green"
-    });
-    setFormOpen(true);
-  }
-
   function openEdit(project: Project) {
     setEditing(project);
     setFolderForm({
@@ -715,24 +1064,17 @@ function Home({
       siteName: project.siteName,
       labelColor: project.labelColor
     });
-    setFormOpen(true);
   }
 
-  async function saveFolder(event: FormEvent) {
+  function saveFolder(event: FormEvent) {
     event.preventDefault();
-    if (!folderForm.name.trim()) return;
-    const input = {
+    if (!editing || !folderForm.name.trim()) return;
+    onEditProject(editing.id, {
       name: folderForm.name.trim(),
       siteName: folderForm.siteName.trim(),
       labelColor: folderForm.labelColor
-    };
-    if (editing) {
-      onEditProject(editing.id, input);
-    } else {
-      const newId = await onCreateProject(input);
-      onSelectProject(newId);
-    }
-    setFormOpen(false);
+    });
+    setEditing(null);
   }
 
   function deleteProject(projectId: Id<"projects">) {
@@ -765,7 +1107,7 @@ function Home({
             <Pencil size={16} />
             이름 변경
           </button>
-          <button className="btn primary" onClick={openCreate}>
+          <button className="btn primary" onClick={onRequestCreate}>
             <Plus size={16} />새 폴더
           </button>
         </div>
@@ -822,10 +1164,10 @@ function Home({
 
       {!visibleProjects.length && <div className="empty-state">검색 결과가 없습니다.</div>}
 
-      {formOpen && (
+      {editing && (
         <div className="modal-backdrop" role="presentation">
           <form className="modal" onSubmit={saveFolder}>
-            <h2>{editing ? "프로젝트 폴더 수정" : "새 프로젝트 폴더"}</h2>
+            <h2>프로젝트 폴더 수정</h2>
             <label className="field">
               프로젝트명
               <input value={folderForm.name} onChange={(event) => setFolderForm({ ...folderForm, name: event.target.value })} />
@@ -849,7 +1191,7 @@ function Home({
               ))}
             </div>
             <div className="modal-actions">
-              <button className="btn" type="button" onClick={() => setFormOpen(false)}>
+              <button className="btn" type="button" onClick={() => setEditing(null)}>
                 취소
               </button>
               <button className="btn primary" type="submit">
@@ -857,6 +1199,190 @@ function Home({
               </button>
             </div>
           </form>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function CreateFolderModal({
+  parentName,
+  onClose,
+  onSubmit
+}: {
+  parentName?: string;
+  onClose: () => void;
+  onSubmit: (input: {
+    name: string;
+    siteName: string;
+    labelColor: LabelColor;
+    kind: ProjectKind;
+  }) => void | Promise<void>;
+}) {
+  const [form, setForm] = useState<{
+    name: string;
+    siteName: string;
+    labelColor: LabelColor;
+    kind: ProjectKind;
+  }>({ name: "", siteName: "", labelColor: "green", kind: "script" });
+
+  function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!form.name.trim()) return;
+    onSubmit({
+      name: form.name.trim(),
+      siteName: form.siteName.trim(),
+      labelColor: form.labelColor,
+      kind: form.kind
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form className="modal" onSubmit={submit}>
+        <h2>새 폴더 만들기</h2>
+        {parentName && <p className="hint">{parentName} 안에 만들어집니다.</p>}
+        <div className="kind-picker" role="radiogroup" aria-label="폴더 종류">
+          {(Object.keys(projectKindMeta) as ProjectKind[]).map((kind) => {
+            const Icon = kind === "category" ? Folder : kind === "memo" ? StickyNote : FileText;
+            return (
+              <button
+                key={kind}
+                type="button"
+                role="radio"
+                aria-checked={form.kind === kind}
+                className={`kind-option ${form.kind === kind ? "active" : ""}`}
+                onClick={() => setForm({ ...form, kind })}
+              >
+                <Icon size={20} />
+                <strong>{projectKindMeta[kind].label}</strong>
+                <small>{projectKindMeta[kind].description}</small>
+              </button>
+            );
+          })}
+        </div>
+        <label className="field">
+          폴더 이름
+          <input
+            autoFocus
+            value={form.name}
+            onChange={(event) => setForm({ ...form, name: event.target.value })}
+            placeholder="예: 북항 제안 발표"
+          />
+        </label>
+        {form.kind === "script" && (
+          <label className="field">
+            사업지명
+            <input
+              value={form.siteName}
+              onChange={(event) => setForm({ ...form, siteName: event.target.value })}
+              placeholder="예: 부산 북항 2단계 사업지"
+            />
+          </label>
+        )}
+        <div className="swatches" aria-label="라벨 색상">
+          {(["green", "blue", "orange", "violet"] as LabelColor[]).map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={`swatch ${color} ${form.labelColor === color ? "active" : ""}`}
+              onClick={() => setForm({ ...form, labelColor: color })}
+              aria-label={`${color} label`}
+            />
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn" type="button" onClick={onClose}>
+            취소
+          </button>
+          <button className="btn primary" type="submit">
+            만들기
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function MemoDetail({
+  project,
+  onUpdateMemoText,
+  onNavigate
+}: {
+  project: Project;
+  onUpdateMemoText: (memoText: string) => void;
+  onNavigate: (view: View) => void;
+}) {
+  return (
+    <section className="project-screen">
+      <header className="project-topbar">
+        <div>
+          <button className="text-link mobile-only" onClick={() => onNavigate("home")}>
+            <ArrowLeft size={16} />홈
+          </button>
+          <h1>{project.name}</h1>
+          <div className="stats">
+            <span>메모 폴더</span>
+          </div>
+        </div>
+      </header>
+      <div className="memo-detail">
+        <textarea
+          className="memo-detail-input"
+          value={project.memoText}
+          onChange={(event) => onUpdateMemoText(event.target.value)}
+          placeholder="자유롭게 메모를 기록하세요."
+          aria-label="메모 내용"
+        />
+      </div>
+    </section>
+  );
+}
+
+function CategoryDetail({
+  project,
+  childProjects,
+  onOpenProject,
+  onRequestCreate
+}: {
+  project: Project;
+  childProjects: Project[];
+  onOpenProject: (projectId: Id<"projects">) => void;
+  onRequestCreate: (parentId?: Id<"projects">) => void;
+}) {
+  return (
+    <section className="screen-wrap">
+      <header className="page-header">
+        <div>
+          <p className="kicker">Category folder</p>
+          <h1>{project.name}</h1>
+          <p className="subcopy">다른 폴더를 담아 정리하는 분류 폴더입니다. 좌측 트리에서 폴더를 끌어다 넣을 수 있습니다.</p>
+        </div>
+        <div className="header-actions">
+          <button className="btn primary" onClick={() => onRequestCreate(project.id)}>
+            <Plus size={16} />이 폴더에 새로 만들기
+          </button>
+        </div>
+      </header>
+
+      {childProjects.length === 0 ? (
+        <div className="empty-state">아직 비어 있습니다. 좌측 트리에서 폴더를 끌어다 넣거나 새로 만들어 보세요.</div>
+      ) : (
+        <div className="folder-list grid">
+          {childProjects.map((child) => {
+            const Icon = child.kind === "category" ? Folder : child.kind === "memo" ? StickyNote : FileText;
+            return (
+              <article key={child.id} className="folder-card">
+                <button className="folder-main" onClick={() => onOpenProject(child.id)}>
+                  <span className={`label-strip ${child.labelColor}`} />
+                  <span className="folder-title">
+                    <Icon size={15} /> {child.name}
+                  </span>
+                  <span className="folder-site">{projectKindMeta[child.kind].label}</span>
+                </button>
+              </article>
+            );
+          })}
         </div>
       )}
     </section>

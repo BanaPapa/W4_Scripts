@@ -1,7 +1,12 @@
 import { mutation, MutationCtx, query } from "./_generated/server";
 import { v } from "convex/values";
 import { seedProjects } from "../src/data";
-import { labelColorValidator, projectMemosValidator, scriptSectionValidator } from "./schema";
+import {
+  labelColorValidator,
+  projectKindValidator,
+  projectMemosValidator,
+  scriptSectionValidator
+} from "./schema";
 
 async function insertSeedProjects(ctx: MutationCtx) {
   for (const project of seedProjects) {
@@ -39,9 +44,39 @@ export const create = mutation({
   args: {
     name: v.string(),
     siteName: v.string(),
-    labelColor: labelColorValidator
+    labelColor: labelColorValidator,
+    kind: v.optional(projectKindValidator),
+    parentId: v.optional(v.id("projects"))
   },
   handler: async (ctx, args) => {
+    const kind = args.kind ?? "script";
+    const all = await ctx.db.query("projects").collect();
+    const siblings = all.filter(
+      (project) => project.deletedAt === undefined && project.parentId === args.parentId
+    );
+    const order = siblings.reduce((max, project) => Math.max(max, project.order ?? 0), 0) + 1;
+
+    const sections =
+      kind === "script"
+        ? [
+            {
+              id: crypto.randomUUID(),
+              title: "Introduction",
+              collapsed: false,
+              pages: [
+                {
+                  id: crypto.randomUUID(),
+                  title: "오프닝",
+                  script: "새 발표 원고를 작성합니다.",
+                  memo: "",
+                  referenceLinks: [],
+                  tags: []
+                }
+              ]
+            }
+          ]
+        : [];
+
     return await ctx.db.insert("projects", {
       name: args.name,
       siteName: args.siteName,
@@ -49,24 +84,35 @@ export const create = mutation({
       favorite: false,
       updatedAt: new Date().toISOString(),
       projectMemos: { qa: "", caution: "", feedback: "" },
-      sections: [
-        {
-          id: crypto.randomUUID(),
-          title: "Introduction",
-          collapsed: false,
-          pages: [
-            {
-              id: crypto.randomUUID(),
-              title: "오프닝",
-              script: "새 발표 원고를 작성합니다.",
-              memo: "",
-              referenceLinks: [],
-              tags: []
-            }
-          ]
-        }
-      ]
+      sections,
+      kind,
+      parentId: args.parentId,
+      order,
+      memoText: ""
     });
+  }
+});
+
+// Move a project to a new parent and renumber the destination parent's children
+// (0..n-1) so ordering stays stable even when older docs share order values.
+export const reorderProjects = mutation({
+  args: {
+    movedId: v.id("projects"),
+    parentId: v.optional(v.id("projects")),
+    orderedIds: v.array(v.id("projects"))
+  },
+  handler: async (ctx, { movedId, parentId, orderedIds }) => {
+    await ctx.db.patch(movedId, { parentId, updatedAt: new Date().toISOString() });
+    for (let index = 0; index < orderedIds.length; index += 1) {
+      await ctx.db.patch(orderedIds[index], { order: index });
+    }
+  }
+});
+
+export const updateMemoText = mutation({
+  args: { id: v.id("projects"), memoText: v.string() },
+  handler: async (ctx, { id, memoText }) => {
+    await ctx.db.patch(id, { memoText, updatedAt: new Date().toISOString() });
   }
 });
 

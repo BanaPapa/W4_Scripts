@@ -6,6 +6,8 @@ export type LabelColor = "green" | "blue" | "orange" | "violet";
 
 export type MemoKind = "qa" | "caution" | "feedback";
 
+export type ProjectKind = "script" | "category" | "memo";
+
 export interface ScriptPage {
   id: string;
   title: string;
@@ -32,4 +34,8 @@ export interface Project {
   sections: ScriptSection[];
   projectMemos: Record<MemoKind, string>;
   deletedAt?: string;
+  kind: ProjectKind;
+  parentId?: Id<"projects">;
+  order: number;
+  memoText: string;
 }
