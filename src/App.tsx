@@ -1,6 +1,8 @@
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Copy,
   Download,
   FileSpreadsheet,
@@ -19,17 +21,15 @@ import {
   Search,
   Settings,
   Star,
-  StickyNote,
   Sun,
   Trash2
 } from "lucide-react";
-import { CSSProperties, DragEvent, FormEvent, MouseEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, DragEvent, Fragment, FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
-import type { LabelColor, MemoKind, Project, ProjectKind, ScriptPage, View } from "./types";
+import type { LabelColor, MemoKind, Project, ProjectKind, ScriptPage, ScriptSection, View } from "./types";
 import {
-  descendantProjectIds,
   downloadText,
   estimateSeconds,
   exportXlsx,
@@ -41,13 +41,100 @@ import {
   projectChildren
 } from "./utils";
 
-const projectKindMeta: Record<ProjectKind, { label: string; description: string }> = {
-  script: { label: "스크립트 폴더", description: "구획과 페이지로 발표 원고를 작성합니다." },
-  category: { label: "분류 폴더", description: "다른 폴더를 안에 담아 정리합니다." },
-  memo: { label: "메모 폴더", description: "구획 없이 단일 메모 텍스트만 기록합니다." }
-};
+/** Sections with an empty title are implicit containers: their notes render
+ *  directly under the project without a divider row. */
+function isDividerSection(section: ScriptSection) {
+  return section.title.trim() !== "";
+}
 
 const UI_STORAGE_KEY = "pt-script-manager-ui-v1";
+
+type EmojiCategory = { id: string; label: string; icon: string; list: string[] };
+
+const emojiCategories: EmojiCategory[] = [
+  {
+    id: "study",
+    label: "문서·사무",
+    icon: "📁",
+    list: [
+      "📁", "📂", "🗂️", "🗃️", "📦", "📚", "📖", "📕", "📗", "📘",
+      "📙", "📔", "📓", "📒", "📑", "📄", "📃", "📜", "📰", "🗞️",
+      "📝", "✏️", "🖊️", "🖋️", "🖍️", "✒️", "🖌️", "📌", "📍", "🔖"
+    ]
+  },
+  {
+    id: "smiley",
+    label: "표정·사람",
+    icon: "😀",
+    list: [
+      "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
+      "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚"
+    ]
+  },
+  {
+    id: "animal",
+    label: "동물",
+    icon: "🐶",
+    list: [
+      "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
+      "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆"
+    ]
+  },
+  {
+    id: "nature",
+    label: "자연·날씨",
+    icon: "🌿",
+    list: [
+      "🌵", "🎄", "🌲", "🌳", "🌴", "🌱", "🌿", "☘️", "🍀", "🎍",
+      "🍃", "🍂", "🍁", "🌾", "🌺", "🌸", "🌼", "🌻", "🌷", "🌹"
+    ]
+  },
+  {
+    id: "food",
+    label: "음식·음료",
+    icon: "🍎",
+    list: [
+      "🍎", "🍏", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐",
+      "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🥑", "🥦"
+    ]
+  },
+  {
+    id: "activity",
+    label: "활동·취미",
+    icon: "⚽",
+    list: [
+      "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉", "🥏", "🎱",
+      "🪀", "🏓", "🏸", "🏒", "🏑", "🥍", "🏏", "🥅", "⛳", "🪁"
+    ]
+  },
+  {
+    id: "transport",
+    label: "이동수단",
+    icon: "🚗",
+    list: [
+      "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑", "🚒", "🚐",
+      "🚚", "🚛", "🚜", "🛴", "🚲", "🛵", "🏍️", "🚨", "🚔", "🚍"
+    ]
+  },
+  {
+    id: "place",
+    label: "건물·장소",
+    icon: "🏠",
+    list: [
+      "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️", "🎡", "🎢", "🎠",
+      "⛲", "⛱️", "🏖️", "🏝️", "🏜️", "🌋", "⛰️", "🏔️", "🗻", "🏕️"
+    ]
+  },
+  {
+    id: "heart",
+    label: "하트",
+    icon: "❤️",
+    list: [
+      "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
+      "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟"
+    ]
+  }
+];
 
 type DragInfo =
   | { type: "section"; sectionId: string }
@@ -189,6 +276,7 @@ function mapProjectDoc(doc: {
   name: string;
   siteName: string;
   labelColor: LabelColor;
+  emoji?: string;
   favorite: boolean;
   updatedAt: string;
   projectMemos: Project["projectMemos"];
@@ -204,6 +292,7 @@ function mapProjectDoc(doc: {
     name: doc.name,
     siteName: doc.siteName,
     labelColor: doc.labelColor,
+    emoji: doc.emoji ?? "📁",
     favorite: doc.favorite,
     updatedAt: doc.updatedAt,
     projectMemos: doc.projectMemos,
@@ -225,9 +314,23 @@ export default function App() {
   const removeProjectMutation = useMutation(api.projects.remove);
   const restoreProjectMutation = useMutation(api.projects.restore);
   const permanentlyDeleteProjectMutation = useMutation(api.projects.permanentlyDelete);
-  const patchProjectMutation = useMutation(api.projects.patch);
+  // Optimistic updates keep typing responsive: without them every keystroke
+  // waits a full server round trip before the controlled input re-renders.
+  const patchProjectMutation = useMutation(api.projects.patch).withOptimisticUpdate((localStore, args) => {
+    const current = localStore.getQuery(api.projects.list, {});
+    if (current === undefined) return;
+    localStore.setQuery(
+      api.projects.list,
+      {},
+      current.map((doc) =>
+        doc._id === args.id
+          ? { ...doc, sections: args.sections, projectMemos: args.projectMemos, updatedAt: new Date().toISOString() }
+          : doc
+      )
+    );
+  });
   const reorderProjectsMutation = useMutation(api.projects.reorderProjects);
-  const updateMemoTextMutation = useMutation(api.projects.updateMemoText);
+  const flattenHierarchyMutation = useMutation(api.projects.flattenHierarchy);
   const seedIfEmptyMutation = useMutation(api.projects.seedIfEmpty);
 
   const projects: Project[] = useMemo(() => (projectsQuery ?? []).map(mapProjectDoc), [projectsQuery]);
@@ -239,7 +342,9 @@ export default function App() {
   const [uiSettings, setUISettings] = useState<UISettings>(loadUISettings);
   const [resizingNav, setResizingNav] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<Id<"projects">>>(new Set());
-  const [createFolder, setCreateFolder] = useState<{ parentId?: Id<"projects"> } | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [autoRenameId, setAutoRenameId] = useState<Id<"projects"> | null>(null);
+  const migrationRequested = useRef(false);
 
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
 
@@ -248,6 +353,18 @@ export default function App() {
       seedIfEmptyMutation({});
     }
   }, [projectsQuery, seedIfEmptyMutation]);
+
+  // Legacy data (category/memo folders, nested parents) is flattened once into
+  // the 2-level project → note model.
+  useEffect(() => {
+    if (migrationRequested.current) return;
+    const docs = [...(projectsQuery ?? []), ...(trashQuery ?? [])];
+    const needsMigration = docs.some((doc) => (doc.kind ?? "script") !== "script" || doc.parentId !== undefined);
+    if (needsMigration) {
+      migrationRequested.current = true;
+      flattenHierarchyMutation({});
+    }
+  }, [projectsQuery, trashQuery, flattenHierarchyMutation]);
 
   useEffect(() => {
     localStorage.setItem(UI_STORAGE_KEY, JSON.stringify(uiSettings));
@@ -311,6 +428,13 @@ export default function App() {
     setExpandedProjectIds((current) => new Set(current).add(projectId));
   }
 
+  function toggleAllExpanded() {
+    setExpandedProjectIds((current) => {
+      if (current.size > 0) return new Set();
+      return new Set(projects.map((project) => project.id));
+    });
+  }
+
   function toggleProjectExpanded(projectId: Id<"projects">) {
     setExpandedProjectIds((current) => {
       const next = new Set(current);
@@ -340,27 +464,46 @@ export default function App() {
     updateMetaMutation({ id, ...input });
   }
 
-  async function submitCreateFolder(input: {
-    name: string;
-    siteName: string;
-    labelColor: LabelColor;
-    kind: ProjectKind;
-  }) {
-    const parentId = createFolder?.parentId;
-    const newId = await createProjectMutation({ ...input, parentId });
-    setCreateFolder(null);
-    if (parentId) {
-      setExpandedProjectIds((current) => new Set(current).add(parentId));
-    }
+  function handleRenameProject(id: Id<"projects">, name: string) {
+    const project = projects.find((item) => item.id === id);
+    if (!project) return;
+    updateMetaMutation({ id, name, siteName: project.siteName, labelColor: project.labelColor });
+  }
+
+  async function submitCreateProject(input: { name: string; siteName: string; labelColor: LabelColor }) {
+    const newId = await createProjectMutation(input);
+    setCreateOpen(false);
     openProject(newId);
   }
 
-  function handleMoveProject(
-    movedId: Id<"projects">,
-    parentId: Id<"projects"> | undefined,
-    orderedIds: Id<"projects">[]
-  ) {
-    reorderProjectsMutation({ movedId, parentId, orderedIds });
+  // The nav "+" skips the modal: the project appears immediately, ready to rename.
+  async function quickCreateProject() {
+    const newId = await createProjectMutation({ name: "새 프로젝트", siteName: "", labelColor: "green" });
+    openProject(newId);
+    setAutoRenameId(newId);
+  }
+
+  // The big "+" button: append a fresh note to the given project and open it.
+  function addNoteToProject(projectId: Id<"projects">) {
+    const project = projects.find((item) => item.id === projectId);
+    if (!project) return;
+    const page: ScriptPage = { id: uid("page"), title: "새 노트", script: "", memo: "", referenceLinks: [], tags: [] };
+    const sections: ScriptSection[] = project.sections.length
+      ? project.sections.map((section, index) =>
+          index === project.sections.length - 1
+            ? { ...section, collapsed: false, pages: [...section.pages, page] }
+            : section
+        )
+      : [{ id: uid("section"), title: "", collapsed: false, pages: [page] }];
+    patchProjectMutation({ id: projectId, sections, projectMemos: project.projectMemos });
+    setActiveProjectId(projectId);
+    setSelectedPageId(page.id);
+    setView("project");
+    setExpandedProjectIds((current) => new Set(current).add(projectId));
+  }
+
+  function handleMoveProject(orderedIds: Id<"projects">[]) {
+    reorderProjectsMutation({ orderedIds });
   }
 
   function handleDeleteProject(id: Id<"projects">) {
@@ -377,6 +520,12 @@ export default function App() {
 
   function handleToggleFavorite(id: Id<"projects">) {
     toggleFavoriteMutation({ id });
+  }
+
+  function handleEmojiChange(id: Id<"projects">, emoji: string) {
+    const project = projects.find((item) => item.id === id);
+    if (!project) return;
+    updateMetaMutation({ id, name: project.name, siteName: project.siteName, labelColor: project.labelColor, emoji });
   }
 
   if (projectsQuery === undefined) {
@@ -470,13 +619,23 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${uiSettings.theme}`} style={appStyle}>
-      <button
-        className="theme-toggle"
-        onClick={toggleTheme}
-        aria-label={uiSettings.theme === "light" ? "다크 모드로 전환" : "라이트 모드로 전환"}
-      >
-        {uiSettings.theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
-      </button>
+      <div className="top-right-bar">
+        <button
+          className={`corner-icon-btn ${view === "settings" ? "active" : ""}`}
+          onClick={() => setView("settings")}
+          aria-label="설정"
+          title="설정"
+        >
+          <Settings size={17} />
+        </button>
+        <button
+          className="corner-icon-btn"
+          onClick={toggleTheme}
+          aria-label={uiSettings.theme === "light" ? "다크 모드로 전환" : "라이트 모드로 전환"}
+        >
+          {uiSettings.theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+        </button>
+      </div>
       <GlobalSearch projects={projects} onOpenResult={openSearchResult} />
       <Sidebar
         view={view}
@@ -485,21 +644,29 @@ export default function App() {
         onNavigate={setView}
         onResizeStart={() => setResizingNav(true)}
         projects={projects}
-        activeProjectId={activeProjectId}
+        activeProjectId={activeProject.id}
         selectedPageId={selectedPageId}
         expandedProjectIds={expandedProjectIds}
         onToggleProjectExpanded={toggleProjectExpanded}
+        onToggleAllExpanded={toggleAllExpanded}
         onToggleTreeSection={toggleTreeSection}
+        onUpdateProject={updateProject}
         onOpenProject={openProject}
         onSelectTreePage={openSearchResult}
         onMoveProject={handleMoveProject}
-        onRequestCreate={(parentId) => setCreateFolder({ parentId })}
+        onRenameProject={handleRenameProject}
+        onDeleteProject={handleDeleteProject}
+        onQuickCreateProject={quickCreateProject}
+        onAddNote={addNoteToProject}
+        onEmojiChange={handleEmojiChange}
+        autoRenameId={autoRenameId}
+        onAutoRenameConsumed={() => setAutoRenameId(null)}
       />
       <main className="main-area">
         {view === "home" && (
           <Home
             projects={projects}
-            onRequestCreate={() => setCreateFolder({})}
+            onRequestCreate={() => setCreateOpen(true)}
             onEditProject={handleEditProject}
             onDeleteProject={handleDeleteProject}
             onToggleFavorite={handleToggleFavorite}
@@ -509,22 +676,7 @@ export default function App() {
             onOpenTrash={() => setView("trash")}
           />
         )}
-        {view === "project" && activeProject.kind === "memo" && (
-          <MemoDetail
-            project={activeProject}
-            onUpdateMemoText={(memoText) => updateMemoTextMutation({ id: activeProject.id, memoText })}
-            onNavigate={setView}
-          />
-        )}
-        {view === "project" && activeProject.kind === "category" && (
-          <CategoryDetail
-            project={activeProject}
-            childProjects={projectChildren(projects, activeProject.id)}
-            onOpenProject={openProject}
-            onRequestCreate={(parentId) => setCreateFolder({ parentId })}
-          />
-        )}
-        {view === "project" && activeProject.kind === "script" && (
+        {view === "project" && (
           <ProjectDetail
             project={activeProject}
             selectedPageId={selectedPageId}
@@ -550,17 +702,52 @@ export default function App() {
           />
         )}
       </main>
-      {createFolder && (
-        <CreateFolderModal
-          parentName={
-            createFolder.parentId
-              ? projects.find((project) => project.id === createFolder.parentId)?.name
-              : undefined
-          }
-          onClose={() => setCreateFolder(null)}
-          onSubmit={submitCreateFolder}
-        />
-      )}
+      {createOpen && <CreateProjectModal onClose={() => setCreateOpen(false)} onSubmit={submitCreateProject} />}
+    </div>
+  );
+}
+
+function ConfirmModal({
+  title,
+  message,
+  confirmLabel,
+  onConfirm,
+  onClose
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal confirm-modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <h2>{title}</h2>
+        <p className="confirm-message">{message}</p>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            취소
+          </button>
+          <button type="button" className="btn danger" onClick={onConfirm} autoFocus>
+            {confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -576,10 +763,10 @@ function TrashView({
   onPermanentlyDelete: (id: Id<"projects">) => void;
   onBack: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
+
   function permanentlyDelete(project: Project) {
-    const message = `'${project.name}' 프로젝트를 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`;
-    if (!window.confirm(message)) return;
-    onPermanentlyDelete(project.id);
+    setConfirmDelete(project);
   }
 
   return (
@@ -618,19 +805,30 @@ function TrashView({
           ))}
         </div>
       )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="완전 삭제"
+          message={`'${confirmDelete.name}' 프로젝트를 완전히 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.`}
+          confirmLabel="완전 삭제"
+          onConfirm={() => {
+            onPermanentlyDelete(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </section>
   );
 }
 
-type DropMode = "before" | "after" | "inside";
+type DropMode = "before" | "after";
 
-interface DropPlan {
-  parentId: Id<"projects"> | undefined;
-  orderedIds: Id<"projects">[];
-}
+type TreeDrag =
+  | { type: "section"; sectionId: string }
+  | { type: "page"; sectionId: string; pageId: string };
 
 interface NavCtx {
-  projects: Project[];
   view: View;
   activeProjectId: Id<"projects"> | "";
   selectedPageId: string;
@@ -639,22 +837,270 @@ interface NavCtx {
   drop: { id: Id<"projects">; mode: DropMode } | null;
   onToggleProjectExpanded: (id: Id<"projects">) => void;
   onToggleTreeSection: (projectId: Id<"projects">, sectionId: string) => void;
+  onUpdateProject: (projectId: Id<"projects">, updater: (project: Project) => Project) => void;
   onOpenProject: (id: Id<"projects">) => void;
   onSelectTreePage: (projectId: Id<"projects">, pageId: string) => void;
-  onRequestCreate: (parentId?: Id<"projects">) => void;
+  onRenameProject: (projectId: Id<"projects">, name: string) => void;
+  onAddNote: (projectId: Id<"projects">) => void;
+  onEmojiChange: (projectId: Id<"projects">, emoji: string) => void;
+  autoRenameId: Id<"projects"> | null;
+  onAutoRenameConsumed: () => void;
   onRowDragStart: (project: Project, event: DragEvent<HTMLElement>) => void;
   onRowDragOver: (project: Project, event: DragEvent<HTMLElement>) => void;
   onRowDrop: (project: Project, event: DragEvent<HTMLElement>) => void;
   onRowDragEnd: () => void;
+  onRowContextMenu: (project: Project, event: MouseEvent<HTMLElement>) => void;
 }
 
 function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
   const expanded = ctx.expandedProjectIds.has(project.id);
   const isActive = project.id === ctx.activeProjectId && ctx.view === "project";
-  const canExpand = project.kind === "category" || project.kind === "script";
+  const canExpand = project.sections.some((section) => section.pages.length > 0 || isDividerSection(section));
   const dropClass = ctx.drop && ctx.drop.id === project.id ? `drop-${ctx.drop.mode}` : "";
-  const KindIcon = project.kind === "category" ? Folder : project.kind === "memo" ? StickyNote : FileText;
-  const children = project.kind === "category" ? projectChildren(ctx.projects, project.id) : [];
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
+  const [treeDrag, setTreeDrag] = useState<TreeDrag | null>(null);
+  const [treeDrop, setTreeDrop] = useState<{ key: string; mode: DropMode | "inside" } | null>(null);
+  const [itemMenu, setItemMenu] = useState<{
+    type: "section" | "page";
+    sectionId: string;
+    pageId?: string;
+    label: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [confirmDeletePage, setConfirmDeletePage] = useState<{
+    sectionId: string;
+    pageId: string;
+    label: string;
+  } | null>(null);
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!itemMenu) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setItemMenu(null);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [itemMenu]);
+
+  function onSectionContextMenu(section: ScriptSection, event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setItemMenu({ type: "section", sectionId: section.id, label: section.title, x: event.clientX, y: event.clientY });
+  }
+
+  function onPageContextMenu(section: ScriptSection, page: ScriptPage, event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setItemMenu({
+      type: "page",
+      sectionId: section.id,
+      pageId: page.id,
+      label: pageWord(page),
+      x: event.clientX,
+      y: event.clientY
+    });
+  }
+
+  function renameSectionFromMenu() {
+    if (!itemMenu || itemMenu.type !== "section") return;
+    const sectionId = itemMenu.sectionId;
+    const current = project.sections.find((section) => section.id === sectionId);
+    setItemMenu(null);
+    const title = window.prompt("구획 이름", current?.title ?? "");
+    if (!title?.trim()) return;
+    ctx.onUpdateProject(project.id, (proj) => ({
+      ...proj,
+      sections: proj.sections.map((section) =>
+        section.id === sectionId ? { ...section, title: title.trim() } : section
+      )
+    }));
+  }
+
+  // Removing a divider keeps its notes: they merge into the previous section
+  // (or back to the project root when it was the first divider).
+  function dissolveSectionFromMenu() {
+    if (!itemMenu || itemMenu.type !== "section") return;
+    const sectionId = itemMenu.sectionId;
+    setItemMenu(null);
+    ctx.onUpdateProject(project.id, (proj) => {
+      const index = proj.sections.findIndex((section) => section.id === sectionId);
+      if (index < 0) return proj;
+      const target = proj.sections[index];
+      const sections = proj.sections.filter((section) => section.id !== sectionId);
+      if (target.pages.length) {
+        if (index === 0) {
+          sections.unshift({ id: uid("section"), title: "", collapsed: false, pages: target.pages });
+        } else {
+          const prev = sections[index - 1];
+          sections[index - 1] = { ...prev, collapsed: false, pages: [...prev.pages, ...target.pages] };
+        }
+      }
+      return { ...proj, sections };
+    });
+  }
+
+  // Insert a divider right above the clicked note: it and the notes after it
+  // move into a new section.
+  function splitSectionFromMenu() {
+    if (!itemMenu || itemMenu.type !== "page" || !itemMenu.pageId) return;
+    const { sectionId, pageId } = itemMenu;
+    setItemMenu(null);
+    const title = window.prompt("새 구획 이름", "새 구획");
+    if (!title?.trim()) return;
+    ctx.onUpdateProject(project.id, (proj) => {
+      const sections: ScriptSection[] = [];
+      for (const section of proj.sections) {
+        if (section.id !== sectionId) {
+          sections.push(section);
+          continue;
+        }
+        const index = section.pages.findIndex((page) => page.id === pageId);
+        if (index < 0) {
+          sections.push(section);
+          continue;
+        }
+        const before = section.pages.slice(0, index);
+        if (before.length > 0 || isDividerSection(section)) sections.push({ ...section, pages: before });
+        sections.push({ id: uid("section"), title: title.trim(), collapsed: false, pages: section.pages.slice(index) });
+      }
+      return { ...proj, sections };
+    });
+  }
+
+  function deletePageFromMenu() {
+    if (!itemMenu || itemMenu.type !== "page" || !itemMenu.pageId) return;
+    setConfirmDeletePage({ sectionId: itemMenu.sectionId, pageId: itemMenu.pageId, label: itemMenu.label });
+    setItemMenu(null);
+  }
+
+  function confirmDeletePageNow() {
+    if (!confirmDeletePage) return;
+    const { sectionId, pageId } = confirmDeletePage;
+    ctx.onUpdateProject(project.id, (current) => ({
+      ...current,
+      sections: current.sections.map((section) =>
+        section.id === sectionId ? { ...section, pages: section.pages.filter((page) => page.id !== pageId) } : section
+      )
+    }));
+    setConfirmDeletePage(null);
+  }
+
+  useEffect(() => {
+    if (ctx.autoRenameId !== project.id) return;
+    setRenameDraft(project.name);
+    ctx.onAutoRenameConsumed();
+  }, [ctx.autoRenameId, project.id]);
+
+  function commitRename() {
+    if (renameDraft === null) return;
+    const name = renameDraft.trim();
+    if (name && name !== project.name) ctx.onRenameProject(project.id, name);
+    setRenameDraft(null);
+  }
+
+  function halfDropMode(event: DragEvent<HTMLElement>): DropMode {
+    const rect = event.currentTarget.getBoundingClientRect();
+    return event.clientY - rect.top < rect.height / 2 ? "before" : "after";
+  }
+
+  function onTreeItemDragStart(item: TreeDrag, event: DragEvent<HTMLElement>) {
+    event.stopPropagation();
+    setTreeDrag(item);
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("text/plain", item.type === "section" ? item.sectionId : item.pageId);
+  }
+
+  function onTreeDragEnd() {
+    setTreeDrag(null);
+    setTreeDrop(null);
+  }
+
+  function onSectionDragOver(sectionId: string, event: DragEvent<HTMLElement>) {
+    if (!treeDrag) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (treeDrag.type === "section") {
+      if (treeDrag.sectionId === sectionId) {
+        setTreeDrop(null);
+        return;
+      }
+      setTreeDrop({ key: `section:${sectionId}`, mode: halfDropMode(event) });
+    } else {
+      setTreeDrop({ key: `section:${sectionId}`, mode: "inside" });
+    }
+  }
+
+  function movePage(
+    drag: { pageId: string },
+    toSectionId: string,
+    targetPageId: string | undefined,
+    mode: DropMode | "inside"
+  ) {
+    ctx.onUpdateProject(project.id, (current) => {
+      let moved: ScriptPage | undefined;
+      const stripped = current.sections.map((section) => {
+        const found = section.pages.find((page) => page.id === drag.pageId);
+        if (found) moved = found;
+        return { ...section, pages: section.pages.filter((page) => page.id !== drag.pageId) };
+      });
+      if (!moved) return current;
+      return {
+        ...current,
+        sections: stripped.map((section) => {
+          if (section.id !== toSectionId) return section;
+          const pages = [...section.pages];
+          const index = targetPageId ? pages.findIndex((page) => page.id === targetPageId) : -1;
+          if (index < 0) pages.push(moved!);
+          else pages.splice(index + (mode === "after" ? 1 : 0), 0, moved!);
+          return { ...section, pages };
+        })
+      };
+    });
+  }
+
+  function onSectionDrop(sectionId: string, event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const drag = treeDrag;
+    const dropInfo = treeDrop;
+    onTreeDragEnd();
+    if (!drag || !dropInfo || dropInfo.key !== `section:${sectionId}`) return;
+    if (drag.type === "section") {
+      ctx.onUpdateProject(project.id, (current) => {
+        const ids = current.sections.map((section) => section.id).filter((id) => id !== drag.sectionId);
+        const index = ids.indexOf(sectionId);
+        if (index < 0) return current;
+        ids.splice(index + (dropInfo.mode === "after" ? 1 : 0), 0, drag.sectionId);
+        const byId = new Map(current.sections.map((section) => [section.id, section]));
+        return { ...current, sections: ids.map((id) => byId.get(id)!) };
+      });
+    } else {
+      movePage(drag, sectionId, undefined, "after");
+    }
+  }
+
+  function onPageDragOver(pageId: string, event: DragEvent<HTMLElement>) {
+    if (!treeDrag || treeDrag.type !== "page") return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (treeDrag.pageId === pageId) {
+      setTreeDrop(null);
+      return;
+    }
+    setTreeDrop({ key: `page:${pageId}`, mode: halfDropMode(event) });
+  }
+
+  function onPageDrop(sectionId: string, pageId: string, event: DragEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    const drag = treeDrag;
+    const dropInfo = treeDrop;
+    onTreeDragEnd();
+    if (!drag || drag.type !== "page" || !dropInfo || dropInfo.key !== `page:${pageId}`) return;
+    movePage(drag, sectionId, pageId, dropInfo.mode);
+  }
 
   return (
     <div className="nav-tree-project">
@@ -662,11 +1108,12 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
         className={`nav-tree-project-head ${isActive ? "active" : ""} ${
           ctx.dragId === project.id ? "dragging" : ""
         } ${dropClass}`}
-        draggable
+        draggable={renameDraft === null}
         onDragStart={(event) => ctx.onRowDragStart(project, event)}
         onDragOver={(event) => ctx.onRowDragOver(project, event)}
         onDrop={(event) => ctx.onRowDrop(project, event)}
         onDragEnd={ctx.onRowDragEnd}
+        onContextMenu={(event) => ctx.onRowContextMenu(project, event)}
         title={project.name}
       >
         {canExpand ? (
@@ -679,67 +1126,204 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
             }}
             aria-label={expanded ? "접기" : "펼치기"}
           >
-            <ChevronDown size={13} className={expanded ? "" : "rotated"} />
+            <ChevronDown size={16} className={expanded ? "" : "rotated"} />
           </button>
         ) : (
           <span className="tree-caret spacer" />
         )}
-        <span className={`label-strip ${project.labelColor}`} />
-        <KindIcon size={14} className="nav-kind-icon" />
-        <button type="button" className="nav-tree-project-label" onClick={() => ctx.onOpenProject(project.id)}>
-          {project.name}
+        <button
+          type="button"
+          className="nav-emoji-btn"
+          onClick={(event) => {
+            event.stopPropagation();
+            setEmojiPickerOpen(true);
+          }}
+          aria-label="이모지 변경"
+          title="이모지 변경"
+        >
+          {project.emoji}
         </button>
-        {project.kind === "category" && (
+        {renameDraft !== null ? (
+          <input
+            className="nav-rename-input"
+            value={renameDraft}
+            autoFocus
+            onFocus={(event) => event.target.select()}
+            onChange={(event) => setRenameDraft(event.target.value)}
+            onBlur={commitRename}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") commitRename();
+              else if (event.key === "Escape") setRenameDraft(null);
+            }}
+            onClick={(event) => event.stopPropagation()}
+            aria-label="이름 변경"
+          />
+        ) : (
           <button
             type="button"
-            className="tree-add"
-            onClick={(event) => {
+            className="nav-tree-project-label"
+            onClick={() => ctx.onOpenProject(project.id)}
+            onDoubleClick={(event) => {
               event.stopPropagation();
-              ctx.onRequestCreate(project.id);
+              setRenameDraft(project.name);
             }}
-            aria-label="하위 폴더 추가"
           >
-            <Plus size={13} />
+            {project.name}
           </button>
         )}
+        <button
+          type="button"
+          className="tree-add"
+          onClick={(event) => {
+            event.stopPropagation();
+            ctx.onAddNote(project.id);
+          }}
+          aria-label="새 노트 추가"
+          title="새 노트 추가"
+        >
+          <Plus size={13} />
+        </button>
       </div>
 
-      {expanded && project.kind === "category" && children.length > 0 && (
+      {expanded && (
         <div className="nav-children">
-          {children.map((child) => (
-            <NavProjectNode key={child.id} project={child} ctx={ctx} />
-          ))}
+          {/* First, render all divider sections (sections with titles) */}
+          {project.sections.map((section) => {
+            const divider = isDividerSection(section);
+            if (!divider) return null;
+            return (
+              <Fragment key={section.id}>
+                <button
+                  type="button"
+                  className={`nav-tree-section-head ${
+                    treeDrop?.key === `section:${section.id}` ? `drop-${treeDrop.mode}` : ""
+                  }`}
+                  onClick={() => ctx.onToggleTreeSection(project.id, section.id)}
+                  title={section.title}
+                  draggable
+                  onDragStart={(event) => onTreeItemDragStart({ type: "section", sectionId: section.id }, event)}
+                  onDragOver={(event) => onSectionDragOver(section.id, event)}
+                  onDrop={(event) => onSectionDrop(section.id, event)}
+                  onDragEnd={onTreeDragEnd}
+                  onContextMenu={(event) => onSectionContextMenu(section, event)}
+                >
+                  <ChevronDown size={12} className={section.collapsed ? "rotated" : ""} />
+                  <span className="nav-tree-section-label">{section.title}</span>
+                </button>
+                {!section.collapsed &&
+                  section.pages.map((page) => (
+                    <button
+                      key={page.id}
+                      type="button"
+                      className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""} ${
+                        treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""
+                      }`}
+                      onClick={() => ctx.onSelectTreePage(project.id, page.id)}
+                      title={pageWord(page)}
+                      draggable
+                      onDragStart={(event) =>
+                        onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
+                      }
+                      onDragOver={(event) => onPageDragOver(page.id, event)}
+                      onDrop={(event) => onPageDrop(section.id, page.id, event)}
+                      onDragEnd={onTreeDragEnd}
+                      onContextMenu={(event) => onPageContextMenu(section, page, event)}
+                    >
+                      {pageWord(page)}
+                    </button>
+                  ))}
+              </Fragment>
+            );
+          })}
+          {/* Then, render pages from implicit sections (sections with empty titles) */}
+          {project.sections.map((section) => {
+            const divider = isDividerSection(section);
+            if (divider) return null;
+            return section.pages.map((page) => (
+              <button
+                key={page.id}
+                type="button"
+                className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""} ${
+                  treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""
+                }`}
+                onClick={() => ctx.onSelectTreePage(project.id, page.id)}
+                title={pageWord(page)}
+                draggable
+                onDragStart={(event) =>
+                  onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
+                }
+                onDragOver={(event) => onPageDragOver(page.id, event)}
+                onDrop={(event) => onPageDrop(section.id, page.id, event)}
+                onDragEnd={onTreeDragEnd}
+                onContextMenu={(event) => onPageContextMenu(section, page, event)}
+              >
+                {pageWord(page)}
+              </button>
+            ));
+          })}
         </div>
       )}
-
-      {expanded && project.kind === "script" && (
-        <div className="nav-children">
-          {project.sections.map((section) => (
-            <div key={section.id} className="nav-tree-section">
-              <button
-                type="button"
-                className="nav-tree-section-head"
-                onClick={() => ctx.onToggleTreeSection(project.id, section.id)}
-                title={section.title}
-              >
-                <ChevronDown size={12} className={section.collapsed ? "rotated" : ""} />
-                <span className="nav-tree-section-label">{section.title}</span>
-              </button>
-              {!section.collapsed &&
-                section.pages.map((page) => (
-                  <button
-                    key={page.id}
-                    type="button"
-                    className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""}`}
-                    onClick={() => ctx.onSelectTreePage(project.id, page.id)}
-                    title={pageWord(page)}
-                  >
-                    {pageWord(page)}
-                  </button>
-                ))}
-            </div>
-          ))}
+      {itemMenu && (
+        <div
+          className="context-menu-overlay"
+          onMouseDown={() => setItemMenu(null)}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setItemMenu(null);
+          }}
+        >
+          <div
+            className="context-menu"
+            role="menu"
+            style={{
+              left: Math.min(itemMenu.x, window.innerWidth - 188),
+              top: Math.min(itemMenu.y, window.innerHeight - 104)
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            {itemMenu.type === "section" ? (
+              <>
+                <button type="button" role="menuitem" className="context-menu-item" onClick={renameSectionFromMenu}>
+                  <Pencil size={14} />
+                  구획 이름 변경
+                </button>
+                <button type="button" role="menuitem" className="context-menu-item" onClick={dissolveSectionFromMenu}>
+                  <Trash2 size={14} />
+                  구획 해제 (노트 유지)
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" role="menuitem" className="context-menu-item" onClick={splitSectionFromMenu}>
+                  <Plus size={14} />
+                  여기부터 새 구획
+                </button>
+                <button type="button" role="menuitem" className="context-menu-item danger" onClick={deletePageFromMenu}>
+                  <Trash2 size={14} />
+                  노트 삭제
+                </button>
+              </>
+            )}
+          </div>
         </div>
+      )}
+      {confirmDeletePage && (
+        <ConfirmModal
+          title="노트 삭제"
+          message={`'${confirmDeletePage.label}' 노트를 삭제하시겠습니까?`}
+          confirmLabel="삭제"
+          onConfirm={confirmDeletePageNow}
+          onClose={() => setConfirmDeletePage(null)}
+        />
+      )}
+      {emojiPickerOpen && (
+        <EmojiPicker
+          onPick={(emoji) => {
+            ctx.onEmojiChange(project.id, emoji);
+            setEmojiPickerOpen(false);
+          }}
+          onClose={() => setEmojiPickerOpen(false)}
+        />
       )}
     </div>
   );
@@ -756,11 +1340,19 @@ function Sidebar({
   selectedPageId,
   expandedProjectIds,
   onToggleProjectExpanded,
+  onToggleAllExpanded,
   onToggleTreeSection,
+  onUpdateProject,
   onOpenProject,
   onSelectTreePage,
   onMoveProject,
-  onRequestCreate
+  onRenameProject,
+  onDeleteProject,
+  onQuickCreateProject,
+  onAddNote,
+  onEmojiChange,
+  autoRenameId,
+  onAutoRenameConsumed
 }: {
   view: View;
   settings: UISettings;
@@ -772,47 +1364,43 @@ function Sidebar({
   selectedPageId: string;
   expandedProjectIds: Set<Id<"projects">>;
   onToggleProjectExpanded: (projectId: Id<"projects">) => void;
+  onToggleAllExpanded: () => void;
   onToggleTreeSection: (projectId: Id<"projects">, sectionId: string) => void;
+  onUpdateProject: (projectId: Id<"projects">, updater: (project: Project) => Project) => void;
   onOpenProject: (projectId: Id<"projects">) => void;
   onSelectTreePage: (projectId: Id<"projects">, pageId: string) => void;
-  onMoveProject: (
-    movedId: Id<"projects">,
-    parentId: Id<"projects"> | undefined,
-    orderedIds: Id<"projects">[]
-  ) => void;
-  onRequestCreate: (parentId?: Id<"projects">) => void;
+  onMoveProject: (orderedIds: Id<"projects">[]) => void;
+  onRenameProject: (projectId: Id<"projects">, name: string) => void;
+  onDeleteProject: (projectId: Id<"projects">) => void;
+  onQuickCreateProject: () => void;
+  onAddNote: (projectId: Id<"projects">) => void;
+  onEmojiChange: (projectId: Id<"projects">, emoji: string) => void;
+  autoRenameId: Id<"projects"> | null;
+  onAutoRenameConsumed: () => void;
 }) {
-  const items: Array<{ view: View; label: string }> = [
-    { view: "home", label: "홈" },
-    { view: "export", label: "내보내기" },
-    { view: "memos", label: "메모" },
-    { view: "settings", label: "설정" }
-  ];
-
   const [dragId, setDragId] = useState<Id<"projects"> | null>(null);
   const [drop, setDrop] = useState<{ id: Id<"projects">; mode: DropMode } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ id: Id<"projects">; x: number; y: number } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
 
-  const forbidden = useMemo(() => {
-    if (!dragId) return new Set<string>();
-    return new Set<string>([dragId, ...descendantProjectIds(projects, dragId)]);
-  }, [dragId, projects]);
-
-  function computeDropPlan(target: Project, mode: DropMode): DropPlan | null {
-    if (!dragId || dragId === target.id) return null;
-    if (mode === "inside") {
-      if (target.kind !== "category" || forbidden.has(target.id)) return null;
-      const kids = projectChildren(projects, target.id).filter((child) => child.id !== dragId);
-      return { parentId: target.id, orderedIds: [...kids.map((child) => child.id), dragId] };
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setContextMenu(null);
     }
-    const parentId = target.parentId;
-    if (parentId && forbidden.has(parentId)) return null;
-    const siblings = projectChildren(projects, parentId).filter((sibling) => sibling.id !== dragId);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [contextMenu]);
+
+  function computeDropPlan(target: Project, mode: DropMode): Id<"projects">[] | null {
+    if (!dragId || dragId === target.id) return null;
+    const siblings = projectChildren(projects, undefined).filter((sibling) => sibling.id !== dragId);
     const index = siblings.findIndex((sibling) => sibling.id === target.id);
     if (index < 0) return null;
     const insertAt = mode === "after" ? index + 1 : index;
     const orderedIds = siblings.map((sibling) => sibling.id);
     orderedIds.splice(insertAt, 0, dragId);
-    return { parentId, orderedIds };
+    return orderedIds;
   }
 
   function onRowDragStart(project: Project, event: DragEvent<HTMLElement>) {
@@ -830,14 +1418,7 @@ function Sidebar({
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
-    const offset = event.clientY - rect.top;
-    const height = rect.height || 1;
-    let mode: DropMode;
-    if (project.kind === "category") {
-      mode = offset < height * 0.3 ? "before" : offset > height * 0.7 ? "after" : "inside";
-    } else {
-      mode = offset < height / 2 ? "before" : "after";
-    }
+    const mode: DropMode = event.clientY - rect.top < (rect.height || 1) / 2 ? "before" : "after";
     if (!computeDropPlan(project, mode)) {
       setDrop(null);
       return;
@@ -849,8 +1430,8 @@ function Sidebar({
     event.preventDefault();
     event.stopPropagation();
     if (dragId && drop && drop.id === project.id) {
-      const plan = computeDropPlan(project, drop.mode);
-      if (plan) onMoveProject(dragId, plan.parentId, plan.orderedIds);
+      const orderedIds = computeDropPlan(project, drop.mode);
+      if (orderedIds) onMoveProject(orderedIds);
     }
     setDragId(null);
     setDrop(null);
@@ -861,8 +1442,18 @@ function Sidebar({
     setDrop(null);
   }
 
+  function onRowContextMenu(project: Project, event: MouseEvent<HTMLElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ id: project.id, x: event.clientX, y: event.clientY });
+  }
+
+  function deleteFromMenu(target: Project) {
+    setContextMenu(null);
+    setConfirmDelete(target);
+  }
+
   const ctx: NavCtx = {
-    projects,
     view,
     activeProjectId,
     selectedPageId,
@@ -871,13 +1462,19 @@ function Sidebar({
     drop,
     onToggleProjectExpanded,
     onToggleTreeSection,
+    onUpdateProject,
     onOpenProject,
     onSelectTreePage,
-    onRequestCreate,
+    onRenameProject,
+    onAddNote,
+    onEmojiChange,
+    autoRenameId,
+    onAutoRenameConsumed,
     onRowDragStart,
     onRowDragOver,
     onRowDrop,
-    onRowDragEnd
+    onRowDragEnd,
+    onRowContextMenu
   };
 
   const roots = projectChildren(projects, undefined);
@@ -897,32 +1494,39 @@ function Sidebar({
           {settings.navCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
         </button>
       </div>
-      <nav className="nav-list" aria-label="주요 화면">
-        {items.map((item) => (
-          <button
-            key={item.view}
-            className={`nav-item ${view === item.view ? "active" : ""}`}
-            onClick={() => onNavigate(item.view)}
-            title={item.label}
-          >
-            {item.view === "settings" ? <Settings className="nav-icon" size={16} /> : <span className="nav-dot" />}
-            <span className="nav-label">{item.label}</span>
-          </button>
-        ))}
-      </nav>
       {!settings.navCollapsed && (
         <>
+          <button
+            type="button"
+            className="nav-note-add"
+            onClick={() => activeProjectId && onAddNote(activeProjectId)}
+            disabled={!activeProjectId}
+            title="선택한 프로젝트에 새 노트를 추가합니다"
+          >
+            <Plus size={20} />새 노트
+          </button>
           <div className="nav-tree-header">
-            <span>폴더</span>
-            <button
-              type="button"
-              className="tree-add"
-              onClick={() => onRequestCreate()}
-              aria-label="새 폴더 만들기"
-              title="새 폴더 만들기"
-            >
-              <Plus size={15} />
-            </button>
+            <span>프로젝트</span>
+            <span className="nav-tree-header-tools">
+              <button
+                type="button"
+                className="tree-add"
+                onClick={onToggleAllExpanded}
+                aria-label={expandedProjectIds.size > 0 ? "모두 접기" : "모두 펼치기"}
+                title={expandedProjectIds.size > 0 ? "모두 접기" : "모두 펼치기"}
+              >
+                {expandedProjectIds.size > 0 ? <ChevronsDownUp size={15} /> : <ChevronsUpDown size={15} />}
+              </button>
+              <button
+                type="button"
+                className="tree-add"
+                onClick={onQuickCreateProject}
+                aria-label="새 프로젝트 만들기"
+                title="새 프로젝트 만들기"
+              >
+                <Plus size={15} />
+              </button>
+            </span>
           </div>
           <nav className="nav-tree" aria-label="프로젝트 탐색">
             {roots.map((project) => (
@@ -933,6 +1537,48 @@ function Sidebar({
       )}
       {!settings.navCollapsed && (
         <div className="resize-handle" onMouseDown={onResizeStart} role="separator" aria-label="네비게이션 폭 조절" />
+      )}
+      {contextMenu &&
+        (() => {
+          const target = projects.find((project) => project.id === contextMenu.id);
+          if (!target) return null;
+          return (
+            <div
+              className="context-menu-overlay"
+              onMouseDown={() => setContextMenu(null)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setContextMenu(null);
+              }}
+            >
+              <div
+                className="context-menu"
+                role="menu"
+                style={{
+                  left: Math.min(contextMenu.x, window.innerWidth - 168),
+                  top: Math.min(contextMenu.y, window.innerHeight - 56)
+                }}
+                onMouseDown={(event) => event.stopPropagation()}
+              >
+                <button type="button" role="menuitem" className="context-menu-item danger" onClick={() => deleteFromMenu(target)}>
+                  <Trash2 size={14} />
+                  삭제
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+      {confirmDelete && (
+        <ConfirmModal
+          title="항목 삭제"
+          message={`'${confirmDelete.name}' 항목을 삭제하시겠습니까? 삭제된 항목은 휴지통으로 이동합니다.`}
+          confirmLabel="삭제"
+          onConfirm={() => {
+            onDeleteProject(confirmDelete.id);
+            setConfirmDelete(null);
+          }}
+          onClose={() => setConfirmDelete(null)}
+        />
       )}
     </aside>
   );
@@ -1040,6 +1686,7 @@ function Home({
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [mode, setMode] = useState<"grid" | "list">("grid");
   const [editing, setEditing] = useState<Project | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
   const [folderForm, setFolderForm] = useState({
     name: "",
     siteName: "",
@@ -1079,11 +1726,14 @@ function Home({
 
   function deleteProject(projectId: Id<"projects">) {
     const target = projects.find((project) => project.id === projectId);
-    const message = `'${target?.name ?? "이 프로젝트"}' 프로젝트를 삭제하시겠습니까? 삭제된 프로젝트는 휴지통으로 이동합니다.`;
-    if (!window.confirm(message)) return;
-    const next = projects.filter((project) => project.id !== projectId);
-    onDeleteProject(projectId);
-    if (activeProjectId === projectId) onSelectProject(next[0]?.id ?? "");
+    if (target) setConfirmDelete(target);
+  }
+
+  function confirmDeleteProject(target: Project) {
+    setConfirmDelete(null);
+    const next = projects.filter((project) => project.id !== target.id);
+    onDeleteProject(target.id);
+    if (activeProjectId === target.id) onSelectProject(next[0]?.id ?? "");
   }
 
   function toggleFavorite(projectId: Id<"projects">) {
@@ -1108,7 +1758,7 @@ function Home({
             이름 변경
           </button>
           <button className="btn primary" onClick={onRequestCreate}>
-            <Plus size={16} />새 폴더
+            <Plus size={16} />새 프로젝트
           </button>
         </div>
       </header>
@@ -1167,7 +1817,7 @@ function Home({
       {editing && (
         <div className="modal-backdrop" role="presentation">
           <form className="modal" onSubmit={saveFolder}>
-            <h2>프로젝트 폴더 수정</h2>
+            <h2>프로젝트 수정</h2>
             <label className="field">
               프로젝트명
               <input value={folderForm.name} onChange={(event) => setFolderForm({ ...folderForm, name: event.target.value })} />
@@ -1201,30 +1851,32 @@ function Home({
           </form>
         </div>
       )}
+
+      {confirmDelete && (
+        <ConfirmModal
+          title="프로젝트 삭제"
+          message={`'${confirmDelete.name}' 프로젝트를 삭제하시겠습니까? 삭제된 프로젝트는 휴지통으로 이동합니다.`}
+          confirmLabel="삭제"
+          onConfirm={() => confirmDeleteProject(confirmDelete)}
+          onClose={() => setConfirmDelete(null)}
+        />
+      )}
     </section>
   );
 }
 
-function CreateFolderModal({
-  parentName,
+function CreateProjectModal({
   onClose,
   onSubmit
 }: {
-  parentName?: string;
   onClose: () => void;
-  onSubmit: (input: {
-    name: string;
-    siteName: string;
-    labelColor: LabelColor;
-    kind: ProjectKind;
-  }) => void | Promise<void>;
+  onSubmit: (input: { name: string; siteName: string; labelColor: LabelColor }) => void | Promise<void>;
 }) {
-  const [form, setForm] = useState<{
-    name: string;
-    siteName: string;
-    labelColor: LabelColor;
-    kind: ProjectKind;
-  }>({ name: "", siteName: "", labelColor: "green", kind: "script" });
+  const [form, setForm] = useState<{ name: string; siteName: string; labelColor: LabelColor }>({
+    name: "",
+    siteName: "",
+    labelColor: "green"
+  });
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -1232,37 +1884,16 @@ function CreateFolderModal({
     onSubmit({
       name: form.name.trim(),
       siteName: form.siteName.trim(),
-      labelColor: form.labelColor,
-      kind: form.kind
+      labelColor: form.labelColor
     });
   }
 
   return (
     <div className="modal-backdrop" role="presentation">
       <form className="modal" onSubmit={submit}>
-        <h2>새 폴더 만들기</h2>
-        {parentName && <p className="hint">{parentName} 안에 만들어집니다.</p>}
-        <div className="kind-picker" role="radiogroup" aria-label="폴더 종류">
-          {(Object.keys(projectKindMeta) as ProjectKind[]).map((kind) => {
-            const Icon = kind === "category" ? Folder : kind === "memo" ? StickyNote : FileText;
-            return (
-              <button
-                key={kind}
-                type="button"
-                role="radio"
-                aria-checked={form.kind === kind}
-                className={`kind-option ${form.kind === kind ? "active" : ""}`}
-                onClick={() => setForm({ ...form, kind })}
-              >
-                <Icon size={20} />
-                <strong>{projectKindMeta[kind].label}</strong>
-                <small>{projectKindMeta[kind].description}</small>
-              </button>
-            );
-          })}
-        </div>
+        <h2>새 프로젝트 만들기</h2>
         <label className="field">
-          폴더 이름
+          프로젝트 이름
           <input
             autoFocus
             value={form.name}
@@ -1270,16 +1901,14 @@ function CreateFolderModal({
             placeholder="예: 북항 제안 발표"
           />
         </label>
-        {form.kind === "script" && (
-          <label className="field">
-            사업지명
-            <input
-              value={form.siteName}
-              onChange={(event) => setForm({ ...form, siteName: event.target.value })}
-              placeholder="예: 부산 북항 2단계 사업지"
-            />
-          </label>
-        )}
+        <label className="field">
+          사업지명
+          <input
+            value={form.siteName}
+            onChange={(event) => setForm({ ...form, siteName: event.target.value })}
+            placeholder="예: 부산 북항 2단계 사업지"
+          />
+        </label>
         <div className="swatches" aria-label="라벨 색상">
           {(["green", "blue", "orange", "violet"] as LabelColor[]).map((color) => (
             <button
@@ -1301,91 +1930,6 @@ function CreateFolderModal({
         </div>
       </form>
     </div>
-  );
-}
-
-function MemoDetail({
-  project,
-  onUpdateMemoText,
-  onNavigate
-}: {
-  project: Project;
-  onUpdateMemoText: (memoText: string) => void;
-  onNavigate: (view: View) => void;
-}) {
-  return (
-    <section className="project-screen">
-      <header className="project-topbar">
-        <div>
-          <button className="text-link mobile-only" onClick={() => onNavigate("home")}>
-            <ArrowLeft size={16} />홈
-          </button>
-          <h1>{project.name}</h1>
-          <div className="stats">
-            <span>메모 폴더</span>
-          </div>
-        </div>
-      </header>
-      <div className="memo-detail">
-        <textarea
-          className="memo-detail-input"
-          value={project.memoText}
-          onChange={(event) => onUpdateMemoText(event.target.value)}
-          placeholder="자유롭게 메모를 기록하세요."
-          aria-label="메모 내용"
-        />
-      </div>
-    </section>
-  );
-}
-
-function CategoryDetail({
-  project,
-  childProjects,
-  onOpenProject,
-  onRequestCreate
-}: {
-  project: Project;
-  childProjects: Project[];
-  onOpenProject: (projectId: Id<"projects">) => void;
-  onRequestCreate: (parentId?: Id<"projects">) => void;
-}) {
-  return (
-    <section className="screen-wrap">
-      <header className="page-header">
-        <div>
-          <p className="kicker">Category folder</p>
-          <h1>{project.name}</h1>
-          <p className="subcopy">다른 폴더를 담아 정리하는 분류 폴더입니다. 좌측 트리에서 폴더를 끌어다 넣을 수 있습니다.</p>
-        </div>
-        <div className="header-actions">
-          <button className="btn primary" onClick={() => onRequestCreate(project.id)}>
-            <Plus size={16} />이 폴더에 새로 만들기
-          </button>
-        </div>
-      </header>
-
-      {childProjects.length === 0 ? (
-        <div className="empty-state">아직 비어 있습니다. 좌측 트리에서 폴더를 끌어다 넣거나 새로 만들어 보세요.</div>
-      ) : (
-        <div className="folder-list grid">
-          {childProjects.map((child) => {
-            const Icon = child.kind === "category" ? Folder : child.kind === "memo" ? StickyNote : FileText;
-            return (
-              <article key={child.id} className="folder-card">
-                <button className="folder-main" onClick={() => onOpenProject(child.id)}>
-                  <span className={`label-strip ${child.labelColor}`} />
-                  <span className="folder-title">
-                    <Icon size={15} /> {child.name}
-                  </span>
-                  <span className="folder-site">{projectKindMeta[child.kind].label}</span>
-                </button>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -1496,8 +2040,8 @@ function ProjectDetail({
   function addPage(sectionId = selected?.section.id ?? project.sections[0]?.id) {
     const page: ScriptPage = {
       id: uid("page"),
-      title: "새 발표 페이지",
-      script: "선택한 페이지의 발표 원고를 이곳에서 크게 읽기 좋은 줄간격으로 작성합니다.",
+      title: "새 노트",
+      script: "",
       memo: "",
       referenceLinks: [],
       tags: []
@@ -1668,7 +2212,7 @@ function ProjectDetail({
         <div className="header-actions">
           <button className="btn" onClick={() => addPage()}>
             <Plus size={16} />
-            페이지
+            노트
           </button>
           <button className="btn" onClick={duplicatePage}>
             <Copy size={16} />
@@ -1688,7 +2232,7 @@ function ProjectDetail({
       <div className="project-workspace">
         <aside className="page-tree">
           <div className="page-tree-toolbar">
-            <strong>구획 / 페이지</strong>
+            <strong>구획 / 노트</strong>
             <button className="btn subtle compact" onClick={addSection}>
               <Plus size={16} />
               구획
@@ -1731,29 +2275,31 @@ function ProjectDetail({
                 setDragInfo(null);
               }}
             >
-              <div className="section-head">
-                <button onClick={() => toggleSection(section.id)}>
-                  <ChevronDown size={15} className={section.collapsed ? "rotated" : ""} />
-                  {section.title}
-                </button>
-                <div className="section-tools">
-                  <button className="mini-icon" onClick={() => renameSection(section.id)} aria-label="섹션 이름 변경">
-                    <Pencil size={14} />
+              {isDividerSection(section) && (
+                <div className="section-head">
+                  <button onClick={() => toggleSection(section.id)}>
+                    <ChevronDown size={15} className={section.collapsed ? "rotated" : ""} />
+                    {section.title}
                   </button>
-                  <button className="mini-icon" onClick={() => addPage(section.id)} aria-label="섹션에 페이지 추가">
-                    <Plus size={14} />
-                  </button>
-                  <button
-                    className="mini-icon danger"
-                    onClick={() => deleteSection(section.id)}
-                    disabled={project.sections.length <= 1}
-                    aria-label="섹션 삭제"
-                  >
-                    <Trash2 size={14} />
-                  </button>
+                  <div className="section-tools">
+                    <button className="mini-icon" onClick={() => renameSection(section.id)} aria-label="섹션 이름 변경">
+                      <Pencil size={14} />
+                    </button>
+                    <button className="mini-icon" onClick={() => addPage(section.id)} aria-label="섹션에 노트 추가">
+                      <Plus size={14} />
+                    </button>
+                    <button
+                      className="mini-icon danger"
+                      onClick={() => deleteSection(section.id)}
+                      disabled={project.sections.length <= 1}
+                      aria-label="섹션 삭제"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 </div>
-              </div>
-              {!section.collapsed && (
+              )}
+              {(!isDividerSection(section) || !section.collapsed) && (
                 <div
                   className={`page-list ${
                     dropMarker?.type === "section-end" && dropMarker.sectionId === section.id ? "insert-at-end" : ""
@@ -2017,7 +2563,7 @@ function ExportView({ project, onNavigate }: { project: Project; onNavigate: (vi
             return (
               <label className="check-row" key={section.id}>
                 <input type="checkbox" checked={checked} onChange={() => toggleSection(section.id)} />
-                {section.title}
+                {section.title.trim() || "구획 없는 노트"}
               </label>
             );
           })}
@@ -2033,7 +2579,8 @@ function ExportView({ project, onNavigate }: { project: Project; onNavigate: (vi
                 .map((page) => (
                   <section className="print-page" key={page.id}>
                     <b>
-                      P.{flattenPages(project).findIndex((item) => item.page.id === page.id) + 1} · {section.title}
+                      P.{flattenPages(project).findIndex((item) => item.page.id === page.id) + 1}
+                      {section.title.trim() ? ` · ${section.title}` : ""}
                     </b>
                     <h3>{pageWord(page)}</h3>
                     <p>{page.script || "원고 없음"}</p>
@@ -2357,5 +2904,43 @@ function SettingsView({
         </div>
       )}
     </section>
+  );
+}
+
+function EmojiPicker({
+  onPick,
+  onClose
+}: {
+  onPick: (emoji: string) => void;
+  onClose: () => void;
+}) {
+  const [tab, setTab] = useState(0);
+  const cat = emojiCategories[tab];
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="emoji-picker">
+        <div className="ep-title">이모지 선택</div>
+        <div className="ep-tabs">
+          {emojiCategories.map((c, i) => (
+            <button
+              key={c.id}
+              className={`ep-tab ${i === tab ? "active" : ""}`}
+              title={c.label}
+              onClick={() => setTab(i)}
+            >
+              {c.icon}
+            </button>
+          ))}
+        </div>
+        <div className="ep-grid" key={cat.id}>
+          {cat.list.map((emoji, i) => (
+            <button key={`${emoji}-${i}`} onClick={() => { onPick(emoji); onClose(); }} className="ep-btn">
+              {emoji}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }

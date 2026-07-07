@@ -41,6 +41,7 @@ export default defineSchema({
     name: v.string(),
     siteName: v.string(),
     labelColor: labelColorValidator,
+    emoji: v.optional(v.string()),
     favorite: v.boolean(),
     updatedAt: v.string(),
     projectMemos: projectMemosValidator,

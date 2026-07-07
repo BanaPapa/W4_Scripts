@@ -29,6 +29,7 @@ export interface Project {
   name: string;
   siteName: string;
   labelColor: LabelColor;
+  emoji: string;
   favorite: boolean;
   updatedAt: string;
   sections: ScriptSection[];
