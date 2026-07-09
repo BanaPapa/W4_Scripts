@@ -1,6 +1,6 @@
 import type { Id } from "../convex/_generated/dataModel";
 
-export type View = "home" | "project" | "export" | "memos" | "settings" | "trash";
+export type View = "home" | "project" | "memos" | "settings" | "trash";
 
 export type LabelColor = "green" | "blue" | "orange" | "violet";
 
@@ -15,6 +15,9 @@ export interface ScriptPage {
   memo: string;
   referenceLinks: string[];
   tags: string[];
+  // Whether this page is a memo (excluded from page numbering and export counts).
+  // Optional: absent means a regular note.
+  isMemo?: boolean;
 }
 
 export interface ScriptSection {

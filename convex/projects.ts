@@ -247,14 +247,22 @@ export const toggleFavorite = mutation({
   }
 });
 
+// Sections and projectMemos are patched independently: callers send only the
+// field they actually changed. This avoids a stale-cache overwrite where a
+// section edit would resend (and revert) a just-saved projectMemos value, and
+// vice versa. At least one field is expected.
 export const patch = mutation({
   args: {
     id: v.id("projects"),
-    sections: v.array(scriptSectionValidator),
-    projectMemos: projectMemosValidator
+    sections: v.optional(v.array(scriptSectionValidator)),
+    projectMemos: v.optional(projectMemosValidator)
   },
   handler: async (ctx, { id, sections, projectMemos }) => {
-    await ctx.db.patch(id, { sections, projectMemos, updatedAt: new Date().toISOString() });
+    if (sections === undefined && projectMemos === undefined) return;
+    const patchData: Partial<Doc<"projects">> = { updatedAt: new Date().toISOString() };
+    if (sections !== undefined) patchData.sections = sections;
+    if (projectMemos !== undefined) patchData.projectMemos = projectMemos;
+    await ctx.db.patch(id, patchData);
   }
 });
 

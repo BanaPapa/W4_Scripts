@@ -1,8 +1,9 @@
 import type { Project } from "./types";
 
 // Seed folders are all plain script folders at the top level; the classification
-// fields (kind/order/parentId/memoText) are filled in with defaults on read.
-type SeedProject = Omit<Project, "id" | "kind" | "order" | "parentId" | "memoText"> & { id: string };
+// fields (kind/order/parentId/memoText) and the emoji are filled in with
+// defaults on read (mapProjectDoc), so seeds omit them.
+type SeedProject = Omit<Project, "id" | "kind" | "order" | "parentId" | "memoText" | "emoji"> & { id: string };
 
 export const seedProjects: SeedProject[] = [
   {

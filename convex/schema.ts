@@ -7,7 +7,11 @@ export const scriptPageValidator = v.object({
   script: v.string(),
   memo: v.string(),
   referenceLinks: v.array(v.string()),
-  tags: v.array(v.string())
+  tags: v.array(v.string()),
+  // A page flagged as a memo is excluded from page numbering / duration / export
+  // counts and rendered with a memo badge. Optional so existing docs (no flag)
+  // stay valid and are treated as regular notes.
+  isMemo: v.optional(v.boolean())
 });
 
 export const scriptSectionValidator = v.object({

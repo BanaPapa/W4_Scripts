@@ -3,9 +3,7 @@ import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
-  Copy,
   Download,
-  FileSpreadsheet,
   FileText,
   Folder,
   GripVertical,
@@ -17,12 +15,12 @@ import {
   Pencil,
   Pin,
   Plus,
-  Printer,
   Search,
   Settings,
   Star,
   Sun,
-  Trash2
+  Trash2,
+  X
 } from "lucide-react";
 import { CSSProperties, DragEvent, Fragment, FormEvent, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
@@ -30,16 +28,22 @@ import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import type { LabelColor, MemoKind, Project, ProjectKind, ScriptPage, ScriptSection, View } from "./types";
 import {
+  countNotes,
   downloadText,
   estimateSeconds,
   exportXlsx,
   flattenPages,
   formatDate,
   formatDuration,
+  isMemoPage,
   makeMarkdown,
+  makePrintHtml,
+  pageNumbers,
   pageWord,
-  projectChildren
+  projectChildren,
+  scopePageIds
 } from "./utils";
+import type { ExportScope } from "./utils";
 
 /** Sections with an empty title are implicit containers: their notes render
  *  directly under the project without a divider row. */
@@ -59,7 +63,11 @@ const emojiCategories: EmojiCategory[] = [
     list: [
       "📁", "📂", "🗂️", "🗃️", "📦", "📚", "📖", "📕", "📗", "📘",
       "📙", "📔", "📓", "📒", "📑", "📄", "📃", "📜", "📰", "🗞️",
-      "📝", "✏️", "🖊️", "🖋️", "🖍️", "✒️", "🖌️", "📌", "📍", "🔖"
+      "📝", "✏️", "🖊️", "🖋️", "🖍️", "✒️", "🖌️", "📌", "📍", "🔖",
+      "📎", "🖇️", "📐", "📏", "✂️", "📋", "💼", "💻", "⌨️", "🖥️",
+      "🖨️", "🖱️", "📈", "📉", "📊", "🎯", "📮", "✉️", "📧", "📥",
+      "📤", "🗄️", "📆", "📅", "🗓️", "🗒️", "🕰️", "🧭", "⚖️", "⚙️",
+      "🔑", "🔐", "🔒", "🔓"
     ]
   },
   {
@@ -68,7 +76,15 @@ const emojiCategories: EmojiCategory[] = [
     icon: "😀",
     list: [
       "😀", "😃", "😄", "😁", "😆", "😅", "😂", "🤣", "😊", "😇",
-      "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚"
+      "🙂", "🙃", "😉", "😌", "😍", "🥰", "😘", "😗", "😙", "😚",
+      "😋", "😛", "😝", "😜", "🤪", "🤨", "🧐", "🤓", "😎", "🥸",
+      "🤩", "🥳", "😏", "😒", "😞", "😔", "😟", "😕", "🙁", "☹️",
+      "😣", "😖", "😫", "😩", "🥺", "😢", "😭", "😤", "😠", "😡",
+      "🤬", "🤯", "😳", "🥵", "🥶", "😱", "😨", "😰", "😥", "😓",
+      "🤗", "🤔", "🫣", "🤭", "🤫", "🤥", "😶", "😶‍🌫️", "😐", "😑",
+      "😬", "🫨", "🫠", "🙋", "🙋‍♂️", "🙋‍♀️", "🙌", "👏", "👍", "👎",
+      "👊", "✊", "🤛", "🤜", "🤞", "🤟", "🤘", "👌", "🤌", "🤏",
+      "👈", "👉", "👆", "👇", "🖕", "✍️", "🤳", "💅", "🤝", "🙏"
     ]
   },
   {
@@ -77,7 +93,14 @@ const emojiCategories: EmojiCategory[] = [
     icon: "🐶",
     list: [
       "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯",
-      "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆"
+      "🦁", "🐮", "🐷", "🐸", "🐵", "🐔", "🐧", "🐦", "🐤", "🦆",
+      "🦅", "🦉", "🦇", "🐺", "🐗", "🐴", "🦄", "🐝", "🪱", "🐛",
+      "🦋", "🐌", "🐞", "🐜", "🦟", "🦗", "🕷️", "🕸️", "🦂", "🐢",
+      "🐍", "🦎", "🐙", "🦑", "🦞", "🦀", "🐡", "🐠", "🐟", "🐬",
+      "🐳", "🐋", "🦈", "🐊", "🐅", "🐆", "🦓", "🦍", "🦧", "🐘",
+      "🦛", "🦏", "🐪", "🐫", "🦒", "🦘", "🐃", "🐂", "🐄", "🐑",
+      "🐐", "🦌", "🐕", "🐩", "🐈", "🐓", "🦃", "🦚", "🦜", "🦢",
+      "🦩", "🕊️", "🐇", "🦝", "🦡", "🐿️", "🦫", "🦔"
     ]
   },
   {
@@ -86,7 +109,11 @@ const emojiCategories: EmojiCategory[] = [
     icon: "🌿",
     list: [
       "🌵", "🎄", "🌲", "🌳", "🌴", "🌱", "🌿", "☘️", "🍀", "🎍",
-      "🍃", "🍂", "🍁", "🌾", "🌺", "🌸", "🌼", "🌻", "🌷", "🌹"
+      "🍃", "🍂", "🍁", "🌾", "🌺", "🌸", "🌼", "🌻", "🌷", "🌹",
+      "🪴", "🍄", "🐚", "🪨", "🌾", "🌅", "🌅", "🌅", "☀️", "🌤️",
+      "⛅", "🌥️", "☁️", "🌧️", "⛈️", "🌩️", "🌨️", "❄️", "💨", "🌪️",
+      "🌫️", "🌈", "🌊", "🌋", "☄️", "🪐", "🌟", "✨", "🌍", "🌕",
+      "🌛", "🌜", "🌙", "💥", "🔥", "💧", "⚡"
     ]
   },
   {
@@ -95,7 +122,15 @@ const emojiCategories: EmojiCategory[] = [
     icon: "🍎",
     list: [
       "🍎", "🍏", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓", "🫐",
-      "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🥑", "🥦"
+      "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝", "🍅", "🥑", "🥦",
+      "🥬", "🥒", "🌶️", "🌽", "🥕", "🫑", "🥔", "🍠", "🥐", "🍞",
+      "🥖", "🥨", "🥯", "🥞", "🧇", "🧀", "🍖", "🍗", "🥩", "🥓",
+      "🍔", "🍟", "🍕", "🌭", "🥪", "🌮", "🌯", "🫓", "🥙", "🧆",
+      "🍳", "🥘", "🍲", "🫕", "🥫", "🍿", "🥟", "🍱",
+      "🍣", "🍤", "🍙", "🍚", "🍛", "🍜", "🍝", "🍢", "🍘", "🍥",
+      "🥮", "🍢", "🍡", "🍧", "🍨", "🍦", "🥧", "🍰", "🎂", "🍮",
+      "🍭", "🍬", "🍫", "🍩", "🍪", "🍯", "🥛", "☕", "🍵", "🥤",
+      "🧃", "🧉", "🍾", "🍷", "🍸", "🍹", "🍺", "🍻", "🥂"
     ]
   },
   {
@@ -104,7 +139,13 @@ const emojiCategories: EmojiCategory[] = [
     icon: "⚽",
     list: [
       "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉", "🥏", "🎱",
-      "🪀", "🏓", "🏸", "🏒", "🏑", "🥍", "🏏", "🥅", "⛳", "🪁"
+      "🪀", "🏓", "🏸", "🏒", "🏑", "🥍", "🏏", "🥅", "⛳", "🪁",
+      "🏹", "🎣", "🤿", "🥊", "🥋", "🛹", "🛼", "🚴", "🏋️", "🧗",
+      "🏂", "⛷️", "🚣", "🏊", "🏄", "🏇", "🎮",
+      "🕹️", "🎰", "🎲", "🧩", "🎳", "🎭", "🎨", "🎬", "🎤", "🎧",
+      "🎼", "🎹", "🥁", "🎷", "🎺", "🎸", "🎻", "🪕", "🎫", "🎟️",
+      "🎖️", "🏆", "🏅", "🥇", "🥈", "🥉", "🎪", "🧵", "🧶", "♟️",
+      "🎯"
     ]
   },
   {
@@ -113,7 +154,11 @@ const emojiCategories: EmojiCategory[] = [
     icon: "🚗",
     list: [
       "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑", "🚒", "🚐",
-      "🚚", "🚛", "🚜", "🛴", "🚲", "🛵", "🏍️", "🚨", "🚔", "🚍"
+      "🚚", "🚛", "🚜", "🛴", "🚲", "🛵", "🏍️", "🚨", "🚔", "🚍",
+      "🚘", "🚖", "🚡", "🚠", "🚟", "🚃", "🚋", "🚄", "🚅", "🚆",
+      "🚇", "🛩️", "🛫", "✈️", "🚀", "🛸", "🚁", "⛵", "🛶", "🚤",
+      "🚢", "⚓", "🚂", "🚈", "🚝", "🚞", "🛻", "🛺", "🛳️", "⛴️",
+      "🛬", "🛩️", "🛰️"
     ]
   },
   {
@@ -122,16 +167,21 @@ const emojiCategories: EmojiCategory[] = [
     icon: "🏠",
     list: [
       "🗺️", "🗿", "🗽", "🗼", "🏰", "🏯", "🏟️", "🎡", "🎢", "🎠",
-      "⛲", "⛱️", "🏖️", "🏝️", "🏜️", "🌋", "⛰️", "🏔️", "🗻", "🏕️"
+      "⛲", "⛱️", "🏖️", "🏝️", "🏜️", "🌋", "⛰️", "🏔️", "🗻", "🏕️",
+      "🛖", "🏠", "🏡", "🏢", "🏣", "🏤", "🏥", "🏦", "🏨", "🏩",
+      "🏪", "🏫", "🏭", "⛪", "🕌", "🕍", "⛩️", "🕋", "🏬", "🏙️",
+      "🏘️", "💒", "🌌", "🌉", "🌁"
     ]
   },
   {
     id: "heart",
-    label: "하트",
+    label: "하트·기타",
     icon: "❤️",
     list: [
       "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍", "🤎", "💔",
-      "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟"
+      "❣️", "💕", "💞", "💓", "💗", "💖", "💘", "💝", "💟", "❤️‍🔥",
+      "❤️‍🩹", "🫀", "🫁", "💌", "💤", "💢", "💣", "💥", "💨", "💫",
+      "💬", "💭", "🗯️", "💡", "⚡", "🌟", "✨"
     ]
   }
 ];
@@ -324,7 +374,14 @@ export default function App() {
       {},
       current.map((doc) =>
         doc._id === args.id
-          ? { ...doc, sections: args.sections, projectMemos: args.projectMemos, updatedAt: new Date().toISOString() }
+          ? {
+              ...doc,
+              // Only override fields the caller actually sent, matching the
+              // mutation's per-field patch (avoids clobbering the other field).
+              ...(args.sections !== undefined ? { sections: args.sections } : {}),
+              ...(args.projectMemos !== undefined ? { projectMemos: args.projectMemos } : {}),
+              updatedAt: new Date().toISOString()
+            }
           : doc
       )
     );
@@ -337,16 +394,77 @@ export default function App() {
   const trashedProjects: Project[] = useMemo(() => (trashQuery ?? []).map(mapProjectDoc), [trashQuery]);
 
   const [view, setView] = useState<View>("home");
+  const [sort, setSort] = useState<"recent" | "name">("recent");
+  const [mode, setMode] = useState<"grid" | "list">("grid");
   const [activeProjectId, setActiveProjectId] = useState<Id<"projects"> | "">("");
   const [selectedPageId, setSelectedPageId] = useState("");
   const [uiSettings, setUISettings] = useState<UISettings>(loadUISettings);
   const [resizingNav, setResizingNav] = useState(false);
   const [expandedProjectIds, setExpandedProjectIds] = useState<Set<Id<"projects">>>(new Set());
   const [createOpen, setCreateOpen] = useState(false);
+  // Project targeted by the export modal (opened from the tree context menu or
+  // the project landing card). Null = modal closed.
+  const [exportTarget, setExportTarget] = useState<Project | null>(null);
   const [autoRenameId, setAutoRenameId] = useState<Id<"projects"> | null>(null);
   const migrationRequested = useRef(false);
 
+  // Memo unsaved changes tracking
+  const [memoDirty, setMemoDirty] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const memoSaveRef = useRef<(() => void) | null>(null);
+
   const activeProject = projects.find((project) => project.id === activeProjectId) ?? projects[0];
+
+  function navigateFromMemo(action: () => void) {
+    if (view === "memos" && memoDirty) {
+      setPendingAction(() => action);
+      return;
+    }
+    action();
+  }
+
+  function handleMemoSaveAndProceed() {
+    memoSaveRef.current?.();
+    setMemoDirty(false);
+    if (pendingAction) {
+      pendingAction();
+      setPendingAction(null);
+    }
+  }
+
+  function handleMemoDiscardAndProceed() {
+    setMemoDirty(false);
+    if (pendingAction) {
+      pendingAction();
+      setPendingAction(null);
+    }
+  }
+
+  function addPage(sectionId?: string) {
+    const proj = activeProject;
+    if (!proj) return;
+    // Default to the section that holds the currently-selected page so a new
+    // note lands next to what the user is working on; fall back to the first.
+    const selectedSectionId = selectedPageId
+      ? proj.sections.find((section) => section.pages.some((page) => page.id === selectedPageId))?.id
+      : undefined;
+    const targetSectionId = sectionId ?? selectedSectionId ?? proj.sections[0]?.id;
+    const page: ScriptPage = {
+      id: uid("page"),
+      title: "새 노트",
+      script: "",
+      memo: "",
+      referenceLinks: [],
+      tags: []
+    };
+    updateProject(proj.id, (current) => ({
+      ...current,
+      sections: current.sections.map((section) =>
+        section.id === targetSectionId ? { ...section, pages: [...section.pages, page] } : section
+      )
+    }));
+    setSelectedPageId(page.id);
+  }
 
   useEffect(() => {
     if (projectsQuery && projectsQuery.length === 0) {
@@ -392,40 +510,52 @@ export default function App() {
 
   useEffect(() => {
     if (!activeProject) return;
-    const pages = flattenPages(activeProject);
-    if (!pages.some((item) => item.page.id === selectedPageId)) {
-      setSelectedPageId(pages[0]?.page.id ?? "");
+    if (selectedPageId) {
+      const pages = flattenPages(activeProject);
+      if (!pages.some((item) => item.page.id === selectedPageId)) {
+        setSelectedPageId("");
+      }
     }
   }, [activeProject, selectedPageId]);
 
+  // Section edits only ever touch `sections`. Sending just that field means a
+  // section edit can never clobber a concurrently-saved projectMemos value.
   function updateProject(projectId: Id<"projects">, updater: (project: Project) => Project) {
     const project = projects.find((item) => item.id === projectId);
     if (!project) return;
     const next = updater(project);
-    patchProjectMutation({ id: projectId, sections: next.sections, projectMemos: next.projectMemos });
+    patchProjectMutation({ id: projectId, sections: next.sections });
+  }
+
+  // Dedicated path for saving project-level memos: sends only projectMemos.
+  function updateProjectMemos(projectId: Id<"projects">, projectMemos: Record<MemoKind, string>) {
+    patchProjectMutation({ id: projectId, projectMemos });
   }
 
   function openProject(projectId: Id<"projects">) {
-    const project = projects.find((item) => item.id === projectId);
     setActiveProjectId(projectId);
-    setSelectedPageId(project?.sections[0]?.pages[0]?.id ?? "");
+    setSelectedPageId("");
     setView("project");
     setExpandedProjectIds((current) => new Set(current).add(projectId));
   }
 
-  function openSearchResult(projectId: Id<"projects">, pageId: string) {
+  function doOpenPage(projectId: Id<"projects">, pageId: string) {
     const project = projects.find((item) => item.id === projectId);
     if (project) {
       const sections = project.sections.map((section) => ({
         ...section,
         collapsed: section.pages.some((page) => page.id === pageId) ? false : section.collapsed
       }));
-      patchProjectMutation({ id: projectId, sections, projectMemos: project.projectMemos });
+      patchProjectMutation({ id: projectId, sections });
     }
     setActiveProjectId(projectId);
     setSelectedPageId(pageId);
     setView("project");
     setExpandedProjectIds((current) => new Set(current).add(projectId));
+  }
+
+  function openSearchResult(projectId: Id<"projects">, pageId: string) {
+    navigateFromMemo(() => doOpenPage(projectId, pageId));
   }
 
   function toggleAllExpanded() {
@@ -495,7 +625,7 @@ export default function App() {
             : section
         )
       : [{ id: uid("section"), title: "", collapsed: false, pages: [page] }];
-    patchProjectMutation({ id: projectId, sections, projectMemos: project.projectMemos });
+    patchProjectMutation({ id: projectId, sections });
     setActiveProjectId(projectId);
     setSelectedPageId(page.id);
     setView("project");
@@ -619,29 +749,11 @@ export default function App() {
 
   return (
     <div className={`app-shell theme-${uiSettings.theme}`} style={appStyle}>
-      <div className="top-right-bar">
-        <button
-          className={`corner-icon-btn ${view === "settings" ? "active" : ""}`}
-          onClick={() => setView("settings")}
-          aria-label="설정"
-          title="설정"
-        >
-          <Settings size={17} />
-        </button>
-        <button
-          className="corner-icon-btn"
-          onClick={toggleTheme}
-          aria-label={uiSettings.theme === "light" ? "다크 모드로 전환" : "라이트 모드로 전환"}
-        >
-          {uiSettings.theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
-        </button>
-      </div>
-      <GlobalSearch projects={projects} onOpenResult={openSearchResult} />
       <Sidebar
         view={view}
         settings={uiSettings}
         onSettingsChange={setUISettings}
-        onNavigate={setView}
+        onNavigate={(v) => navigateFromMemo(() => setView(v))}
         onResizeStart={() => setResizingNav(true)}
         projects={projects}
         activeProjectId={activeProject.id}
@@ -651,7 +763,7 @@ export default function App() {
         onToggleAllExpanded={toggleAllExpanded}
         onToggleTreeSection={toggleTreeSection}
         onUpdateProject={updateProject}
-        onOpenProject={openProject}
+        onOpenProject={(id) => navigateFromMemo(() => openProject(id))}
         onSelectTreePage={openSearchResult}
         onMoveProject={handleMoveProject}
         onRenameProject={handleRenameProject}
@@ -659,10 +771,55 @@ export default function App() {
         onQuickCreateProject={quickCreateProject}
         onAddNote={addNoteToProject}
         onEmojiChange={handleEmojiChange}
+        onExportProject={setExportTarget}
         autoRenameId={autoRenameId}
         onAutoRenameConsumed={() => setAutoRenameId(null)}
       />
       <main className="main-area">
+        <div className="main-top-bar">
+          <GlobalSearch projects={projects} onOpenResult={openSearchResult} />
+          <div className="top-settings-bar">
+            {view === "home" && (
+              <>
+                <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")} className="select">
+                  <option value="recent">최근 수정순</option>
+                  <option value="name">이름순</option>
+                </select>
+                <div className="segmented" aria-label="보기 방식">
+                  <button className={mode === "grid" ? "active" : ""} onClick={() => setMode("grid")} aria-label="카드 보기">
+                    <LayoutGrid size={17} />
+                  </button>
+                  <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")} aria-label="목록 보기">
+                    <List size={17} />
+                  </button>
+                </div>
+              </>
+            )}
+            <button
+              className={`corner-icon-btn ${view === "settings" ? "active" : ""}`}
+              onClick={() => navigateFromMemo(() => setView("settings"))}
+              aria-label="설정"
+              title="설정"
+            >
+              <Settings size={17} />
+            </button>
+            <button
+              className={`corner-icon-btn ${view === "trash" ? "active" : ""}`}
+              onClick={() => navigateFromMemo(() => setView("trash"))}
+              aria-label="휴지통"
+              title="휴지통"
+            >
+              <Trash2 size={17} />
+            </button>
+            <button
+              className="corner-icon-btn"
+              onClick={toggleTheme}
+              aria-label={uiSettings.theme === "light" ? "다크 모드로 전환" : "라이트 모드로 전환"}
+            >
+              {uiSettings.theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+            </button>
+          </div>
+        </div>
         {view === "home" && (
           <Home
             projects={projects}
@@ -670,27 +827,47 @@ export default function App() {
             onEditProject={handleEditProject}
             onDeleteProject={handleDeleteProject}
             onToggleFavorite={handleToggleFavorite}
-            onOpenProject={openProject}
+            onOpenProject={(id) => navigateFromMemo(() => openProject(id))}
             onSelectProject={setActiveProjectId}
             activeProjectId={activeProjectId}
-            onOpenTrash={() => setView("trash")}
+            sort={sort}
+            mode={mode}
           />
         )}
         {view === "project" && (
           <ProjectDetail
             project={activeProject}
             selectedPageId={selectedPageId}
-            onSelectPage={setSelectedPageId}
             onUpdateProject={(updater) => updateProject(activeProject.id, updater)}
             onNavigate={setView}
+            onAddPage={addPage}
+            onExport={() => setExportTarget(activeProject)}
           />
         )}
-        {view === "export" && <ExportView project={activeProject} onNavigate={setView} />}
         {view === "memos" && (
           <MemosView
             project={activeProject}
-            onUpdateProject={(updater) => updateProject(activeProject.id, updater)}
+            onSaveMemos={(memos) => updateProjectMemos(activeProject.id, memos)}
+            onNavigate={(v: View) => navigateFromMemo(() => setView(v))}
+            onDirtyChange={setMemoDirty}
+            saveRef={memoSaveRef}
           />
+        )}
+        {pendingAction && (
+          <div className="modal-backdrop" role="presentation">
+            <div className="modal" style={{ maxWidth: 380, padding: "24px" }}>
+              <h2 style={{ fontSize: "20px", marginBottom: "12px" }}>저장되지 않은 변경사항</h2>
+              <p style={{ color: "var(--muted)", marginBottom: "20px" }}>메모가 저장되지 않았습니다. 저장하시겠습니까?</p>
+              <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+                <button className="btn" onClick={handleMemoDiscardAndProceed}>
+                  저장하지 않고 이동
+                </button>
+                <button className="btn primary" onClick={handleMemoSaveAndProceed}>
+                  저장 후 이동
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         {view === "settings" && <SettingsView settings={uiSettings} onSettingsChange={setUISettings} />}
         {view === "trash" && (
@@ -703,6 +880,7 @@ export default function App() {
         )}
       </main>
       {createOpen && <CreateProjectModal onClose={() => setCreateOpen(false)} onSubmit={submitCreateProject} />}
+      {exportTarget && <ExportModal project={exportTarget} onClose={() => setExportTarget(null)} />}
     </div>
   );
 }
@@ -852,9 +1030,75 @@ interface NavCtx {
   onRowContextMenu: (project: Project, event: MouseEvent<HTMLElement>) => void;
 }
 
+function NavTreePageButton({
+  page,
+  pageNum,
+  selected,
+  dropClass,
+  onSelect,
+  onToggleMemo,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onContextMenu
+}: {
+  page: ScriptPage;
+  pageNum: number | undefined;
+  selected: boolean;
+  dropClass: string;
+  onSelect: () => void;
+  onToggleMemo: () => void;
+  onDragStart: (event: DragEvent<HTMLElement>) => void;
+  onDragOver: (event: DragEvent<HTMLElement>) => void;
+  onDrop: (event: DragEvent<HTMLElement>) => void;
+  onDragEnd: () => void;
+  onContextMenu: (event: MouseEvent<HTMLElement>) => void;
+}) {
+  // Only arm HTML5 dragging while the grip handle is pressed. Keeping the whole
+  // button `draggable` made Chromium hijack the smallest pointer movement into a
+  // drag, swallowing the click/dblclick that toggles note <-> memo.
+  const [dragArmed, setDragArmed] = useState(false);
+  return (
+    <button
+      type="button"
+      className={`nav-tree-page ${selected ? "active" : ""} ${dropClass}`}
+      onClick={onSelect}
+      onDoubleClick={onToggleMemo}
+      title={pageWord(page)}
+      draggable={dragArmed}
+      onDragStart={onDragStart}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+      onDragEnd={() => {
+        onDragEnd();
+        setDragArmed(false);
+      }}
+      onMouseUp={() => setDragArmed(false)}
+      onMouseLeave={() => setDragArmed(false)}
+      onContextMenu={onContextMenu}
+    >
+      <span className="tree-grip-handle" onMouseDown={() => setDragArmed(true)}>
+        <GripVertical size={13} className="tree-grip" />
+      </span>
+      {isMemoPage(page) ? (
+        <span className="tree-page-num memo-active">
+          <FileText size={12} />
+          메모
+        </span>
+      ) : (
+        <span className="tree-page-num">P.{pageNum}</span>
+      )}
+      <span className="tree-page-title">{pageWord(page)}</span>
+    </button>
+  );
+}
+
 function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
   const expanded = ctx.expandedProjectIds.has(project.id);
-  const isActive = project.id === ctx.activeProjectId && ctx.view === "project";
+  // Global page numbers (memo pages excluded), shared by both section renderers.
+  const pageNumberMap = pageNumbers(project);
+  const isActive = project.id === ctx.activeProjectId && (ctx.view === "project" || ctx.view === "memos");
   const canExpand = project.sections.some((section) => section.pages.length > 0 || isDividerSection(section));
   const dropClass = ctx.drop && ctx.drop.id === project.id ? `drop-${ctx.drop.mode}` : "";
   const [renameDraft, setRenameDraft] = useState<string | null>(null);
@@ -941,6 +1185,54 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     });
   }
 
+  function deleteSectionFromMenu() {
+    if (!itemMenu || itemMenu.type !== "section") return;
+    const sectionId = itemMenu.sectionId;
+    if (project.sections.length <= 1) return;
+    const section = project.sections.find((item) => item.id === sectionId);
+    if (!section) return;
+    setItemMenu(null);
+    const hasContent = section.pages.some((page) =>
+      [page.title, page.script, page.memo, ...(page.referenceLinks ?? []), ...(page.tags ?? [])].some((value) => value.trim())
+    );
+    const message = hasContent
+      ? `"${section.title}" 구획 안에 작성된 노트가 있습니다. 구획과 포함된 노트를 삭제할까요?`
+      : `"${section.title}" 구획을 삭제할까요?`;
+    if (!window.confirm(message)) return;
+    
+    ctx.onUpdateProject(project.id, (current) => ({
+      ...current,
+      sections: current.sections.filter((item) => item.id !== sectionId)
+    }));
+    
+    const flatPages = project.sections.flatMap((s) => s.pages);
+    const remainingPages = flatPages.filter((page) => !section.pages.some((sp) => sp.id === page.id));
+    if (section.pages.some((page) => page.id === ctx.selectedPageId)) {
+      ctx.onSelectTreePage(project.id, remainingPages[0]?.id ?? "");
+    }
+  }
+
+  function addNoteToSectionFromMenu() {
+    if (!itemMenu || itemMenu.type !== "section") return;
+    const sectionId = itemMenu.sectionId;
+    setItemMenu(null);
+    const page: ScriptPage = {
+      id: uid("page"),
+      title: "새 노트",
+      script: "",
+      memo: "",
+      referenceLinks: [],
+      tags: []
+    };
+    ctx.onUpdateProject(project.id, (current) => ({
+      ...current,
+      sections: current.sections.map((section) =>
+        section.id === sectionId ? { ...section, pages: [...section.pages, page] } : section
+      )
+    }));
+    ctx.onSelectTreePage(project.id, page.id);
+  }
+
   // Insert a divider right above the clicked note: it and the notes after it
   // move into a new section.
   function splitSectionFromMenu() {
@@ -967,6 +1259,31 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
       }
       return { ...proj, sections };
     });
+  }
+
+  // Flip a note between note and memo. The current value is read from the live
+  // project so the label/behavior always matches the stored flag.
+  function togglePageMemo(sectionId: string, pageId: string) {
+    ctx.onUpdateProject(project.id, (current) => ({
+      ...current,
+      sections: current.sections.map((section) =>
+        section.id === sectionId
+          ? {
+              ...section,
+              pages: section.pages.map((page) =>
+                page.id === pageId ? { ...page, isMemo: !isMemoPage(page) } : page
+              )
+            }
+          : section
+      )
+    }));
+  }
+
+  function toggleMemoFromMenu() {
+    if (!itemMenu || itemMenu.type !== "page" || !itemMenu.pageId) return;
+    const { sectionId, pageId } = itemMenu;
+    setItemMenu(null);
+    togglePageMemo(sectionId, pageId);
   }
 
   function deletePageFromMenu() {
@@ -1102,6 +1419,13 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     movePage(drag, sectionId, pageId, dropInfo.mode);
   }
 
+  // Whether the page targeted by the open context menu is currently a memo.
+  const menuTargetPage =
+    itemMenu?.type === "page" && itemMenu.pageId
+      ? project.sections.flatMap((section) => section.pages).find((page) => page.id === itemMenu.pageId)
+      : undefined;
+  const menuTargetIsMemo = menuTargetPage ? isMemoPage(menuTargetPage) : false;
+
   return (
     <div className="nav-tree-project">
       <div
@@ -1210,28 +1534,30 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
                   <ChevronDown size={12} className={section.collapsed ? "rotated" : ""} />
                   <span className="nav-tree-section-label">{section.title}</span>
                 </button>
-                {!section.collapsed &&
-                  section.pages.map((page) => (
-                    <button
-                      key={page.id}
-                      type="button"
-                      className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""} ${
-                        treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""
-                      }`}
-                      onClick={() => ctx.onSelectTreePage(project.id, page.id)}
-                      title={pageWord(page)}
-                      draggable
-                      onDragStart={(event) =>
-                        onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
-                      }
-                      onDragOver={(event) => onPageDragOver(page.id, event)}
-                      onDrop={(event) => onPageDrop(section.id, page.id, event)}
-                      onDragEnd={onTreeDragEnd}
-                      onContextMenu={(event) => onPageContextMenu(section, page, event)}
-                    >
-                      {pageWord(page)}
-                    </button>
-                  ))}
+                {!section.collapsed && (
+                  <div className="nav-page-list">
+                    {section.pages.map((page) => {
+                      return (
+                        <NavTreePageButton
+                          key={page.id}
+                          page={page}
+                          pageNum={pageNumberMap.get(page.id)}
+                          selected={isActive && page.id === ctx.selectedPageId}
+                          dropClass={treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""}
+                          onSelect={() => ctx.onSelectTreePage(project.id, page.id)}
+                          onToggleMemo={() => togglePageMemo(section.id, page.id)}
+                          onDragStart={(event) =>
+                            onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
+                          }
+                          onDragOver={(event) => onPageDragOver(page.id, event)}
+                          onDrop={(event) => onPageDrop(section.id, page.id, event)}
+                          onDragEnd={onTreeDragEnd}
+                          onContextMenu={(event) => onPageContextMenu(section, page, event)}
+                        />
+                      );
+                    })}
+                  </div>
+                )}
               </Fragment>
             );
           })}
@@ -1239,27 +1565,31 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
           {project.sections.map((section) => {
             const divider = isDividerSection(section);
             if (divider) return null;
-            return section.pages.map((page) => (
-              <button
-                key={page.id}
-                type="button"
-                className={`nav-tree-page ${isActive && page.id === ctx.selectedPageId ? "active" : ""} ${
-                  treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""
-                }`}
-                onClick={() => ctx.onSelectTreePage(project.id, page.id)}
-                title={pageWord(page)}
-                draggable
-                onDragStart={(event) =>
-                  onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
-                }
-                onDragOver={(event) => onPageDragOver(page.id, event)}
-                onDrop={(event) => onPageDrop(section.id, page.id, event)}
-                onDragEnd={onTreeDragEnd}
-                onContextMenu={(event) => onPageContextMenu(section, page, event)}
-              >
-                {pageWord(page)}
-              </button>
-            ));
+            if (section.pages.length === 0) return null;
+            return (
+              <div className="nav-page-list implicit" key={section.id}>
+                {section.pages.map((page) => {
+                  return (
+                    <NavTreePageButton
+                      key={page.id}
+                      page={page}
+                      pageNum={pageNumberMap.get(page.id)}
+                      selected={isActive && page.id === ctx.selectedPageId}
+                      dropClass={treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""}
+                      onSelect={() => ctx.onSelectTreePage(project.id, page.id)}
+                      onToggleMemo={() => togglePageMemo(section.id, page.id)}
+                      onDragStart={(event) =>
+                        onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
+                      }
+                      onDragOver={(event) => onPageDragOver(page.id, event)}
+                      onDrop={(event) => onPageDrop(section.id, page.id, event)}
+                      onDragEnd={onTreeDragEnd}
+                      onContextMenu={(event) => onPageContextMenu(section, page, event)}
+                    />
+                  );
+                })}
+              </div>
+            );
           })}
         </div>
       )}
@@ -1287,9 +1617,17 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
                   <Pencil size={14} />
                   구획 이름 변경
                 </button>
+                <button type="button" role="menuitem" className="context-menu-item" onClick={addNoteToSectionFromMenu}>
+                  <Plus size={14} />
+                  여기에 노트 추가
+                </button>
                 <button type="button" role="menuitem" className="context-menu-item" onClick={dissolveSectionFromMenu}>
                   <Trash2 size={14} />
                   구획 해제 (노트 유지)
+                </button>
+                <button type="button" role="menuitem" className="context-menu-item danger" onClick={deleteSectionFromMenu}>
+                  <Trash2 size={14} />
+                  구획 및 노트 전체 삭제
                 </button>
               </>
             ) : (
@@ -1297,6 +1635,10 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
                 <button type="button" role="menuitem" className="context-menu-item" onClick={splitSectionFromMenu}>
                   <Plus size={14} />
                   여기부터 새 구획
+                </button>
+                <button type="button" role="menuitem" className="context-menu-item" onClick={toggleMemoFromMenu}>
+                  {menuTargetIsMemo ? <FileText size={14} /> : <Pin size={14} />}
+                  {menuTargetIsMemo ? "노트로 전환" : "메모로 전환"}
                 </button>
                 <button type="button" role="menuitem" className="context-menu-item danger" onClick={deletePageFromMenu}>
                   <Trash2 size={14} />
@@ -1351,6 +1693,7 @@ function Sidebar({
   onQuickCreateProject,
   onAddNote,
   onEmojiChange,
+  onExportProject,
   autoRenameId,
   onAutoRenameConsumed
 }: {
@@ -1375,6 +1718,7 @@ function Sidebar({
   onQuickCreateProject: () => void;
   onAddNote: (projectId: Id<"projects">) => void;
   onEmojiChange: (projectId: Id<"projects">, emoji: string) => void;
+  onExportProject: (project: Project) => void;
   autoRenameId: Id<"projects"> | null;
   onAutoRenameConsumed: () => void;
 }) {
@@ -1499,11 +1843,10 @@ function Sidebar({
           <button
             type="button"
             className="nav-note-add"
-            onClick={() => activeProjectId && onAddNote(activeProjectId)}
-            disabled={!activeProjectId}
-            title="선택한 프로젝트에 새 노트를 추가합니다"
+            onClick={onQuickCreateProject}
+            title="새 프로젝트 만들기"
           >
-            <Plus size={20} />새 노트
+            <Plus size={20} />새 프로젝트
           </button>
           <div className="nav-tree-header">
             <span>프로젝트</span>
@@ -1560,6 +1903,45 @@ function Sidebar({
                 }}
                 onMouseDown={(event) => event.stopPropagation()}
               >
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    onUpdateProject(target.id, (proj) => ({
+                      ...proj,
+                      sections: [...proj.sections, { id: uid("section"), title: "새 구획", collapsed: false, pages: [] }]
+                    }));
+                    setContextMenu(null);
+                  }}
+                >
+                  <Plus size={14} />
+                  구획 추가
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    onRenameProject(target.id, window.prompt("프로젝트 이름", target.name) || target.name);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Pencil size={14} />
+                  이름 변경
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    onExportProject(target);
+                    setContextMenu(null);
+                  }}
+                >
+                  <Download size={14} />
+                  내보내기
+                </button>
                 <button type="button" role="menuitem" className="context-menu-item danger" onClick={() => deleteFromMenu(target)}>
                   <Trash2 size={14} />
                   삭제
@@ -1597,33 +1979,87 @@ function GlobalSearch({
 
   const results = useMemo(() => {
     if (!normalizedQuery) return [];
-    return projects
-      .flatMap((project) =>
-        project.sections.flatMap((section) =>
-          section.pages.map((page) => {
-            const haystack = [
-              project.name,
-              project.siteName,
-              section.title,
-              page.title,
-              page.script,
-              page.memo,
-              ...(page.referenceLinks ?? []),
-              ...(page.tags ?? [])
-            ]
-              .join(" ")
-              .toLowerCase();
-            return { project, section, page, matched: haystack.includes(normalizedQuery) };
-          })
-        )
-      )
-      .filter((item) => item.matched)
-      .slice(0, 8);
+
+    function getFieldAccuracy(targetText: string, query: string): number {
+      const target = targetText.toLowerCase();
+      const index = target.indexOf(query);
+      if (index < 0) return -1;
+
+      // Base coverage (0.0 to 1.0)
+      let score = query.length / target.length;
+
+      // Starts-with bonus
+      if (index === 0) {
+        score += 2.0;
+      }
+
+      // Exact match bonus
+      if (target === query) {
+        score += 5.0;
+      }
+
+      return score;
+    }
+
+    const matchedItems: Array<{
+      project: Project;
+      section: ScriptSection;
+      page: ScriptPage;
+      score: number;
+      matchType: string;
+    }> = [];
+
+    for (const project of projects) {
+      for (const section of project.sections) {
+        for (const page of section.pages) {
+          const projAcc = Math.max(
+            getFieldAccuracy(project.name, normalizedQuery),
+            project.siteName ? getFieldAccuracy(project.siteName, normalizedQuery) : -1
+          );
+          const tagAcc = Math.max(
+            ...(page.tags ?? []).map((tag) => getFieldAccuracy(tag, normalizedQuery)),
+            -1
+          );
+          const titleAcc = getFieldAccuracy(page.title, normalizedQuery);
+          const sectAcc = getFieldAccuracy(section.title, normalizedQuery);
+          const contentAcc = Math.max(
+            getFieldAccuracy(page.script, normalizedQuery),
+            getFieldAccuracy(page.memo, normalizedQuery),
+            ...(page.referenceLinks ?? []).map((link) => getFieldAccuracy(link, normalizedQuery)),
+            -1
+          );
+
+          const candidates = [
+            { type: "프로젝트명", score: projAcc >= 0 ? projAcc + 3.0 : -1 },
+            { type: "태그", score: tagAcc >= 0 ? tagAcc + 2.0 : -1 },
+            { type: "노트 제목", score: titleAcc >= 0 ? titleAcc + 1.0 : -1 },
+            { type: "구획명", score: sectAcc >= 0 ? sectAcc + 0.5 : -1 },
+            { type: "본문/메모", score: contentAcc >= 0 ? contentAcc + 0.0 : -1 }
+          ];
+
+          const bestMatch = candidates.reduce(
+            (best, cur) => (cur.score > best.score ? cur : best),
+            { type: "", score: -1 }
+          );
+
+          if (bestMatch.score >= 0) {
+            matchedItems.push({
+              project,
+              section,
+              page,
+              score: bestMatch.score,
+              matchType: bestMatch.type
+            });
+          }
+        }
+      }
+    }
+
+    return matchedItems.sort((a, b) => b.score - a.score).slice(0, 8);
   }, [normalizedQuery, projects]);
 
   function open(projectId: Id<"projects">, pageId: string) {
     onOpenResult(projectId, pageId);
-    setQuery("");
     setFocused(false);
   }
 
@@ -1635,8 +2071,36 @@ function GlobalSearch({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onFocus={() => setFocused(true)}
-          placeholder="모든 프로젝트, 페이지, 태그 검색"
+          onBlur={() => {
+            // Allow onMouseDown on results to complete before hiding
+            setTimeout(() => setFocused(false), 180);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              if (results.length > 0) {
+                const first = results[0];
+                open(first.project.id, first.page.id);
+                (event.target as HTMLInputElement).blur();
+              }
+            } else if (event.key === "Escape") {
+              setFocused(false);
+              (event.target as HTMLInputElement).blur();
+            }
+          }}
+          placeholder="모든 프로젝트, 노트, 태그 검색"
         />
+        {query && (
+          <button
+            type="button"
+            className="search-clear-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              setQuery("");
+            }}
+          >
+            <X size={15} />
+          </button>
+        )}
       </label>
       {focused && normalizedQuery && (
         <div className="global-search-results">
@@ -1648,6 +2112,7 @@ function GlobalSearch({
                   <small>
                     {item.project.name} / {item.section.title}
                   </small>
+                  {item.matchType && <span className="search-match-badge">{item.matchType}</span>}
                 </span>
                 {item.page.tags?.length > 0 && <em>{item.page.tags.slice(0, 3).join(", ")}</em>}
               </button>
@@ -1670,7 +2135,8 @@ function Home({
   onOpenProject,
   onSelectProject,
   activeProjectId,
-  onOpenTrash
+  sort,
+  mode
 }: {
   projects: Project[];
   onRequestCreate: () => void;
@@ -1680,11 +2146,9 @@ function Home({
   onOpenProject: (projectId: Id<"projects">) => void;
   onSelectProject: (projectId: Id<"projects"> | "") => void;
   activeProjectId: Id<"projects"> | "";
-  onOpenTrash: () => void;
+  sort: "recent" | "name";
+  mode: "grid" | "list";
 }) {
-  const [query, setQuery] = useState("");
-  const [sort, setSort] = useState<"recent" | "name">("recent");
-  const [mode, setMode] = useState<"grid" | "list">("grid");
   const [editing, setEditing] = useState<Project | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
   const [folderForm, setFolderForm] = useState({
@@ -1694,15 +2158,13 @@ function Home({
   });
 
   const visibleProjects = useMemo(() => {
-    const q = query.trim().toLowerCase();
     return [...projects]
-      .filter((project) => `${project.name} ${project.siteName}`.toLowerCase().includes(q))
       .sort((a, b) => {
         if (sort === "name") return a.name.localeCompare(b.name, "ko");
         if (a.favorite !== b.favorite) return Number(b.favorite) - Number(a.favorite);
         return b.updatedAt.localeCompare(a.updatedAt);
       });
-  }, [projects, query, sort]);
+  }, [projects, sort]);
 
   function openEdit(project: Project) {
     setEditing(project);
@@ -1742,49 +2204,9 @@ function Home({
 
   return (
     <section className="screen-wrap">
-      <header className="page-header">
-        <div>
-          <p className="kicker">Project folders</p>
-          <h1>제안 발표 프로젝트</h1>
-          <p className="subcopy">사업지별 폴더를 만들고, 최근 수정 순서로 발표 원고 작업을 이어갑니다.</p>
-        </div>
-        <div className="header-actions">
-          <button className="btn" onClick={onOpenTrash}>
-            <Trash2 size={16} />
-            휴지통
-          </button>
-          <button className="btn" onClick={() => openEdit(projects.find((p) => p.id === activeProjectId) ?? projects[0])}>
-            <Pencil size={16} />
-            이름 변경
-          </button>
-          <button className="btn primary" onClick={onRequestCreate}>
-            <Plus size={16} />새 프로젝트
-          </button>
-        </div>
-      </header>
-
-      <div className="filter-row">
-        <label className="search-box">
-          <Search size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="프로젝트명 또는 사업지 검색" />
-        </label>
-        <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")} className="select">
-          <option value="recent">최근 수정순</option>
-          <option value="name">이름순</option>
-        </select>
-        <div className="segmented" aria-label="보기 방식">
-          <button className={mode === "grid" ? "active" : ""} onClick={() => setMode("grid")} aria-label="카드 보기">
-            <LayoutGrid size={17} />
-          </button>
-          <button className={mode === "list" ? "active" : ""} onClick={() => setMode("list")} aria-label="목록 보기">
-            <List size={17} />
-          </button>
-        </div>
-      </div>
-
       <div className={`folder-list ${mode}`}>
         {visibleProjects.map((project) => {
-          const pageCount = flattenPages(project).length;
+          const pageCount = countNotes(project);
           return (
             <article key={project.id} className={`folder-card ${project.id === activeProjectId ? "selected" : ""}`}>
               <button className="folder-main" onClick={() => onOpenProject(project.id)}>
@@ -1792,7 +2214,7 @@ function Home({
                 <span className="folder-title">{project.name}</span>
                 <span className="folder-site">{project.siteName}</span>
                 <span className="folder-meta">
-                  <span>{pageCount}페이지</span>
+                  <span>{pageCount}개 노트</span>
                   <span>{formatDate(project.updatedAt)}</span>
                 </span>
               </button>
@@ -1936,41 +2358,23 @@ function CreateProjectModal({
 function ProjectDetail({
   project,
   selectedPageId,
-  onSelectPage,
   onUpdateProject,
-  onNavigate
+  onNavigate,
+  onAddPage,
+  onExport
 }: {
   project: Project;
   selectedPageId: string;
-  onSelectPage: (pageId: string) => void;
   onUpdateProject: (updater: (project: Project) => Project) => void;
   onNavigate: (view: View) => void;
+  onAddPage: (sectionId?: string) => void;
+  onExport: () => void;
 }) {
-  const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
-  const [dropMarker, setDropMarker] = useState<DropMarker | null>(null);
-  const [pageContextMenu, setPageContextMenu] = useState<{ pageId: string; x: number; y: number } | null>(null);
-  const [detailOpen, setDetailOpen] = useState({ memo: true, links: false, tags: false });
+  const [detailOpen, setDetailOpen] = useState({ memo: false, links: false, tags: false });
   const [tagDraft, setTagDraft] = useState("");
   const flatPages = flattenPages(project);
-  const selected = flatPages.find((item) => item.page.id === selectedPageId) ?? flatPages[0];
+  const selected = selectedPageId ? flatPages.find((item) => item.page.id === selectedPageId) : undefined;
   const selectedPage = selected?.page;
-
-  useEffect(() => {
-    if (!pageContextMenu) return undefined;
-    function closeMenu() {
-      setPageContextMenu(null);
-    }
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("keydown", closeMenu);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("keydown", closeMenu);
-    };
-  }, [pageContextMenu]);
-
-  function pageNumber(pageId: string) {
-    return flatPages.findIndex((item) => item.page.id === pageId) + 1;
-  }
 
   function updateSelectedPage(patch: Partial<ScriptPage>) {
     if (!selectedPage) return;
@@ -1983,179 +2387,7 @@ function ProjectDetail({
     }));
   }
 
-  function renameSection(sectionId: string) {
-    const section = project.sections.find((item) => item.id === sectionId);
-    const title = window.prompt("섹션 이름", section?.title ?? "");
-    if (!title?.trim()) return;
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.map((item) => (item.id === sectionId ? { ...item, title: title.trim() } : item))
-    }));
-  }
 
-  function toggleSection(sectionId: string) {
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.map((section) =>
-        section.id === sectionId ? { ...section, collapsed: !section.collapsed } : section
-      )
-    }));
-  }
-
-  function addSection() {
-    const sectionId = uid("section");
-    onUpdateProject((current) => ({
-      ...current,
-      sections: [
-        ...current.sections,
-        {
-          id: sectionId,
-          title: "새 구획",
-          collapsed: false,
-          pages: []
-        }
-      ]
-    }));
-  }
-
-  function deleteSection(sectionId: string) {
-    if (project.sections.length <= 1) return;
-    const section = project.sections.find((item) => item.id === sectionId);
-    if (!section) return;
-    const hasContent = section.pages.some((page) =>
-      [page.title, page.script, page.memo, ...(page.referenceLinks ?? []), ...(page.tags ?? [])].some((value) => value.trim())
-    );
-    const message = hasContent
-      ? `"${section.title}" 구획 안에 작성된 페이지가 있습니다. 구획과 포함된 페이지를 삭제할까요?`
-      : `"${section.title}" 구획을 삭제할까요?`;
-    if (!window.confirm(message)) return;
-    const remainingPages = flatPages.filter((item) => item.section.id !== sectionId);
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.filter((item) => item.id !== sectionId)
-    }));
-    if (section.pages.some((page) => page.id === selectedPageId)) onSelectPage(remainingPages[0]?.page.id ?? "");
-  }
-
-  function addPage(sectionId = selected?.section.id ?? project.sections[0]?.id) {
-    const page: ScriptPage = {
-      id: uid("page"),
-      title: "새 노트",
-      script: "",
-      memo: "",
-      referenceLinks: [],
-      tags: []
-    };
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.map((section) =>
-        section.id === sectionId ? { ...section, pages: [...section.pages, page] } : section
-      )
-    }));
-    onSelectPage(page.id);
-  }
-
-  function duplicatePage() {
-    if (!selectedPage) return;
-    const copyPage: ScriptPage = {
-      ...selectedPage,
-      id: uid("page"),
-      title: `${selectedPage.title} 복사본`
-    };
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.map((section) => {
-        const index = section.pages.findIndex((page) => page.id === selectedPage.id);
-        if (index < 0) return section;
-        const pages = [...section.pages];
-        pages.splice(index + 1, 0, copyPage);
-        return { ...section, pages };
-      })
-    }));
-    onSelectPage(copyPage.id);
-  }
-
-  function deletePageById(pageId: string) {
-    if (flatPages.length <= 1) return;
-    const target = flatPages.find((item) => item.page.id === pageId)?.page;
-    const hasContent = Boolean(
-      target &&
-        [target.title, target.script, target.memo, ...(target.referenceLinks ?? []), ...(target.tags ?? [])].some((value) =>
-          value.trim()
-        )
-    );
-    if (hasContent && !window.confirm("이 페이지 안에 작성된 내용이 있습니다. 삭제할까요?")) {
-      setPageContextMenu(null);
-      return;
-    }
-    const fallback = flatPages.find((item) => item.page.id !== pageId)?.page.id ?? "";
-    onUpdateProject((current) => ({
-      ...current,
-      sections: current.sections.map((section) => ({
-        ...section,
-        pages: section.pages.filter((page) => page.id !== pageId)
-      }))
-    }));
-    onSelectPage(fallback);
-    setPageContextMenu(null);
-  }
-
-  function openPageContextMenu(event: MouseEvent, pageId: string) {
-    event.preventDefault();
-    event.stopPropagation();
-    onSelectPage(pageId);
-    setPageContextMenu({ pageId, x: event.clientX, y: event.clientY });
-  }
-
-  function getPageDropPosition(event: DragEvent<HTMLElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
-
-  function getSectionDropPosition(event: DragEvent<HTMLElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    return event.clientY < rect.top + rect.height / 2 ? "before" : "after";
-  }
-
-  function handleDrop(target: { sectionId: string; pageId?: string; position?: "before" | "after" }) {
-    if (!dragInfo) return;
-    if (dragInfo.type === "section") {
-      onUpdateProject((current) => {
-        const movedSection = current.sections.find((section) => section.id === dragInfo.sectionId);
-        if (!movedSection || movedSection.id === target.sectionId) return current;
-        const sections = current.sections.filter((section) => section.id !== dragInfo.sectionId);
-        const targetIndex = sections.findIndex((section) => section.id === target.sectionId);
-        if (targetIndex < 0) return current;
-        const insertIndex = targetIndex + (target.position === "after" ? 1 : 0);
-        sections.splice(insertIndex, 0, movedSection);
-        return { ...current, sections };
-      });
-    }
-    if (dragInfo.type === "page") {
-      onUpdateProject((current) => {
-        const sourceSection = current.sections.find((section) => section.id === dragInfo.sectionId);
-        const movedPage = sourceSection?.pages.find((page) => page.id === dragInfo.pageId);
-        if (!movedPage) return current;
-        let sections = current.sections.map((section) =>
-          section.id === dragInfo.sectionId
-            ? { ...section, pages: section.pages.filter((page) => page.id !== dragInfo.pageId) }
-            : { ...section, pages: [...section.pages] }
-        );
-        sections = sections.map((section) => {
-          if (section.id !== target.sectionId) return section;
-          const baseIndex = target.pageId ? section.pages.findIndex((page) => page.id === target.pageId) : -1;
-          const insertIndex =
-            baseIndex >= 0 ? baseIndex + (target.position === "after" ? 1 : 0) : section.pages.length;
-          const pages = [...section.pages];
-          pages.splice(insertIndex, 0, movedPage);
-          return { ...section, pages };
-        });
-        return { ...current, sections };
-      });
-    }
-    setDropMarker(null);
-    setDragInfo(null);
-  }
 
   function toggleDetail(key: keyof typeof detailOpen) {
     setDetailOpen((current) => ({ ...current, [key]: !current[key] }));
@@ -2195,186 +2427,20 @@ function ProjectDetail({
   }
 
   const totalSeconds = estimateSeconds(project);
+  const selectedIsMemo = selectedPage ? isMemoPage(selectedPage) : false;
 
   return (
     <section className="project-screen">
-      <header className="project-topbar">
-        <div>
-          <button className="text-link mobile-only" onClick={() => onNavigate("home")}>
-            <ArrowLeft size={16} />홈
-          </button>
-          <h1>{project.name}</h1>
-          <div className="stats">
-            <span>총 {flatPages.length}페이지</span>
-            <span>예상 {formatDuration(totalSeconds)}</span>
-          </div>
-        </div>
-        <div className="header-actions">
-          <button className="btn" onClick={() => addPage()}>
-            <Plus size={16} />
-            노트
-          </button>
-          <button className="btn" onClick={duplicatePage}>
-            <Copy size={16} />
-            복제
-          </button>
-          <button className="btn" onClick={() => onNavigate("memos")}>
-            <Pin size={16} />
-            메모
-          </button>
-          <button className="btn primary" onClick={() => onNavigate("export")}>
-            <Download size={16} />
-            내보내기
-          </button>
-        </div>
-      </header>
-
       <div className="project-workspace">
-        <aside className="page-tree">
-          <div className="page-tree-toolbar">
-            <strong>구획 / 노트</strong>
-            <button className="btn subtle compact" onClick={addSection}>
-              <Plus size={16} />
-              구획
-            </button>
-          </div>
-          {project.sections.map((section) => (
-            <section
-              key={section.id}
-              className={`tree-section ${section.collapsed ? "collapsed" : ""} ${
-                dropMarker?.type === "section" && dropMarker.sectionId === section.id
-                  ? dropMarker.position === "before"
-                    ? "insert-before"
-                    : "insert-after"
-                  : dropMarker?.type === "section-end" && dropMarker.sectionId === section.id
-                    ? "page-drop-target"
-                  : ""
-              }`}
-              draggable
-              onDragStart={(event) => {
-                if ((event.target as HTMLElement).closest(".page-row, .section-tools button")) return;
-                setDragInfo({ type: "section", sectionId: section.id });
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                if (dragInfo?.type === "section") {
-                  setDropMarker({ type: "section", sectionId: section.id, position: getSectionDropPosition(event) });
-                }
-                if (dragInfo?.type === "page" && section.collapsed) {
-                  setDropMarker({ type: "section-end", sectionId: section.id });
-                }
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                handleDrop({ sectionId: section.id, position: getSectionDropPosition(event) });
-              }}
-              onDragEnd={() => {
-                setDropMarker(null);
-                setDragInfo(null);
-              }}
-            >
-              {isDividerSection(section) && (
-                <div className="section-head">
-                  <button onClick={() => toggleSection(section.id)}>
-                    <ChevronDown size={15} className={section.collapsed ? "rotated" : ""} />
-                    {section.title}
-                  </button>
-                  <div className="section-tools">
-                    <button className="mini-icon" onClick={() => renameSection(section.id)} aria-label="섹션 이름 변경">
-                      <Pencil size={14} />
-                    </button>
-                    <button className="mini-icon" onClick={() => addPage(section.id)} aria-label="섹션에 노트 추가">
-                      <Plus size={14} />
-                    </button>
-                    <button
-                      className="mini-icon danger"
-                      onClick={() => deleteSection(section.id)}
-                      disabled={project.sections.length <= 1}
-                      aria-label="섹션 삭제"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              )}
-              {(!isDividerSection(section) || !section.collapsed) && (
-                <div
-                  className={`page-list ${
-                    dropMarker?.type === "section-end" && dropMarker.sectionId === section.id ? "insert-at-end" : ""
-                  }`}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    if (dragInfo?.type === "page") {
-                      event.stopPropagation();
-                      setDropMarker({ type: "section-end", sectionId: section.id });
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    if (dragInfo?.type === "page") event.stopPropagation();
-                    handleDrop({ sectionId: section.id });
-                  }}
-                >
-                  {section.pages.map((page) => (
-                    <button
-                      key={page.id}
-                      className={`page-row ${page.id === selectedPageId ? "active" : ""} ${
-                        dropMarker?.type === "page" && dropMarker.pageId === page.id
-                          ? dropMarker.position === "before"
-                            ? "insert-before"
-                            : "insert-after"
-                          : ""
-                      }`}
-                      draggable
-                      onClick={() => onSelectPage(page.id)}
-                      onContextMenu={(event) => openPageContextMenu(event, page.id)}
-                      onDragStart={() => setDragInfo({ type: "page", pageId: page.id, sectionId: section.id })}
-                      onDragOver={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        setDropMarker({ type: "page", pageId: page.id, position: getPageDropPosition(event) });
-                      }}
-                      onDrop={(event) => {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        handleDrop({ sectionId: section.id, pageId: page.id, position: getPageDropPosition(event) });
-                      }}
-                      onDragEnd={() => {
-                        setDropMarker(null);
-                        setDragInfo(null);
-                      }}
-                    >
-                      <GripVertical size={15} />
-                      <span className="page-num">P.{pageNumber(page.id)}</span>
-                      <span className="page-title">{pageWord(page)}</span>
-                      {page.memo.trim() && <span className="memo-dot" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </section>
-          ))}
-          {pageContextMenu && (
-            <div className="context-menu" style={{ left: pageContextMenu.x, top: pageContextMenu.y }}>
-              <button onClick={() => deletePageById(pageContextMenu.pageId)} disabled={flatPages.length <= 1}>
-                <Trash2 size={15} />
-                페이지 삭제
-              </button>
-            </div>
-          )}
-        </aside>
-
         <section className="editor-pane">
-          {selectedPage && (
+          {selectedPage ? (
             <article className="editor-surface">
               <div className="editor-head">
                 <input
                   className="title-input"
                   value={selectedPage.title}
                   onChange={(event) => updateSelectedPage({ title: event.target.value })}
-                  aria-label="페이지 제목"
+                  aria-label="노트 제목"
                 />
               </div>
               <textarea
@@ -2384,10 +2450,12 @@ function ProjectDetail({
                 aria-label="발표 원고"
               />
               <div className="page-details">
+                {/* Memo pages only expose search tags; notes keep all three panels. */}
+                {!selectedIsMemo && (
                 <section className="detail-section">
                   <button className="detail-summary" onClick={() => toggleDetail("memo")}>
                     <ChevronDown size={16} className={detailOpen.memo ? "" : "rotated"} />
-                    <strong>페이지 메모</strong>
+                    <strong>노트 메모</strong>
                     <span>{selectedPage.memo.trim() ? "메모 있음" : "접어둘 수 있는 짧은 메모"}</span>
                   </button>
                   {detailOpen.memo && (
@@ -2401,7 +2469,9 @@ function ProjectDetail({
                     </div>
                   )}
                 </section>
+                )}
 
+                {!selectedIsMemo && (
                 <section className="detail-section">
                   <button className="detail-summary" onClick={() => toggleDetail("links")}>
                     <ChevronDown size={16} className={detailOpen.links ? "" : "rotated"} />
@@ -2409,7 +2479,7 @@ function ProjectDetail({
                     <span>{(selectedPage.referenceLinks ?? []).filter(Boolean).length}개 링크</span>
                   </button>
                   {detailOpen.links && (
-                    <div className="detail-body link-list">
+                    <div className="detail-body links-editor">
                       {(selectedPage.referenceLinks ?? []).map((link, index) => (
                         <div className="link-row" key={`${selectedPage.id}-link-${index}`}>
                           <input
@@ -2429,6 +2499,7 @@ function ProjectDetail({
                     </div>
                   )}
                 </section>
+                )}
 
                 <section className="detail-section">
                   <button className="detail-summary" onClick={() => toggleDetail("tags")}>
@@ -2465,6 +2536,41 @@ function ProjectDetail({
                 </section>
               </div>
             </article>
+          ) : (
+            <div className="project-landing-surface">
+              <div className="landing-card">
+                <span className="landing-emoji" role="img" aria-label="emoji">
+                  {project.emoji}
+                </span>
+                <h2>{project.name}</h2>
+                {project.siteName && <p className="landing-site-name">{project.siteName}</p>}
+
+                <div className="landing-divider" />
+
+                <div className="landing-stats">
+                  <div className="landing-stat-item">
+                    <span className="stat-value">{countNotes(project)}개</span>
+                    <span className="stat-label">등록된 노트</span>
+                  </div>
+                  <div className="landing-stat-item">
+                    <span className="stat-value">{formatDuration(totalSeconds)}</span>
+                    <span className="stat-label">예상 발표 시간</span>
+                  </div>
+                </div>
+
+                <div className="landing-actions">
+                  <button className="btn primary landing-btn" onClick={() => onAddPage()}>
+                    <Plus size={16} /> 새 노트 추가하기
+                  </button>
+                  <button className="btn subtle landing-btn" onClick={() => onNavigate("memos")}>
+                    <Pin size={16} /> 프로젝트 메모
+                  </button>
+                  <button className="btn subtle landing-btn" onClick={onExport}>
+                    <Download size={16} /> 내보내기
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </section>
       </div>
@@ -2472,179 +2578,159 @@ function ProjectDetail({
   );
 }
 
-function ExportView({ project, onNavigate }: { project: Project; onNavigate: (view: View) => void }) {
-  const allPageIds = useMemo(() => new Set(flattenPages(project).map((item) => item.page.id)), [project]);
-  const [format, setFormat] = useState<"xlsx" | "md" | "print">("xlsx");
-  const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(allPageIds);
-  const selectedCount = selectedPageIds.size;
+// Open the project's print HTML in a new window and trigger the browser's
+// print dialog (used as the "PDF" export via print-to-PDF).
+function printProject(project: Project, selectedPageIds: Set<string>) {
+  const win = window.open("", "_blank", "width=820,height=1000");
+  if (!win) return;
+  win.document.write(makePrintHtml(project, selectedPageIds));
+  win.document.close();
+  win.focus();
+  // Let the new document lay out before invoking print.
+  window.setTimeout(() => {
+    try {
+      win.print();
+    } catch {
+      /* user may have closed the window */
+    }
+  }, 250);
+}
 
-  useEffect(() => {
-    setSelectedPageIds(allPageIds);
-  }, [allPageIds]);
+function ExportModal({ project, onClose }: { project: Project; onClose: () => void }) {
+  const [scope, setScope] = useState<ExportScope>("all");
+  const [format, setFormat] = useState<"xlsx" | "md" | "pdf">("xlsx");
 
-  function toggleSection(sectionId: string) {
-    const section = project.sections.find((item) => item.id === sectionId);
-    if (!section) return;
-    const ids = section.pages.map((page) => page.id);
-    const allSelected = ids.every((id) => selectedPageIds.has(id));
-    setSelectedPageIds((current) => {
-      const next = new Set(current);
-      ids.forEach((id) => (allSelected ? next.delete(id) : next.add(id)));
-      return next;
-    });
+  const ids = scopePageIds(project, scope);
+  const count = ids.size;
+
+  function run() {
+    if (!count) return;
+    if (format === "xlsx") exportXlsx(project, ids);
+    else if (format === "md") downloadText(`${project.name}.md`, makeMarkdown(project, ids), "text/markdown;charset=utf-8");
+    else if (format === "pdf") printProject(project, ids);
+    onClose();
   }
 
-  function runExport() {
-    if (!selectedPageIds.size) return;
-    if (format === "xlsx") exportXlsx(project, selectedPageIds);
-    if (format === "md") downloadText(`${project.name}.md`, makeMarkdown(project, selectedPageIds), "text/markdown;charset=utf-8");
-    if (format === "print") window.print();
-  }
+  const scopes: Array<{ key: ExportScope; label: string }> = [
+    { key: "all", label: "전부" },
+    { key: "notes", label: "노트만" },
+    { key: "memos", label: "메모만" }
+  ];
+  const formats: Array<{ key: "xlsx" | "md" | "pdf"; label: string }> = [
+    { key: "xlsx", label: "엑셀 (.xlsx)" },
+    { key: "md", label: "마크다운 (.md)" },
+    { key: "pdf", label: "PDF" }
+  ];
 
   return (
-    <section className="screen-wrap export-screen">
-      <header className="page-header">
-        <div>
-          <p className="kicker">Export and print</p>
-          <h1>필요한 범위만 골라 바로 내보내기</h1>
-          <p className="subcopy">섹션 전체, 선택 페이지, 인쇄용 원고를 같은 구조로 정리합니다.</p>
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div className="modal export-modal" style={{ maxWidth: 420, padding: "24px" }} onMouseDown={(event) => event.stopPropagation()}>
+        <h2 style={{ fontSize: "20px", marginBottom: "4px" }}>내보내기</h2>
+        <p style={{ color: "var(--muted)", marginBottom: "20px" }}>{project.name}</p>
+
+        <div className="export-field">
+          <span className="export-label">범위</span>
+          <div className="segmented export-segmented" aria-label="내보내기 범위">
+            {scopes.map((item) => (
+              <button
+                key={item.key}
+                className={scope === item.key ? "active" : ""}
+                onClick={() => setScope(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="header-actions">
-          <button className="btn" onClick={() => onNavigate("project")}>
-            <ArrowLeft size={16} />
-            편집
+
+        <div className="export-field">
+          <span className="export-label">형식</span>
+          <div className="segmented export-segmented" aria-label="내보내기 형식">
+            {formats.map((item) => (
+              <button
+                key={item.key}
+                className={format === item.key ? "active" : ""}
+                onClick={() => setFormat(item.key)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <p className="hint" style={{ marginBottom: "20px" }}>{count}개 페이지 포함</p>
+
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <button className="btn" onClick={onClose}>
+            취소
           </button>
-          <button className="btn primary" onClick={runExport}>
+          <button className="btn primary" onClick={run} disabled={!count}>
             <Download size={16} />
             내보내기
           </button>
         </div>
-      </header>
-
-      <div className="export-layout">
-        <section className="panel pad">
-          <p className="kicker">형식</p>
-          <div className="format-list">
-            <FormatOption
-              active={format === "xlsx"}
-              icon={<FileSpreadsheet size={21} />}
-              title="Excel (.xlsx)"
-              text="섹션, 페이지 번호, 제목, 원고 열로 저장"
-              onClick={() => setFormat("xlsx")}
-            />
-            <FormatOption
-              active={format === "md"}
-              icon={<FileText size={21} />}
-              title="Markdown (.md)"
-              text="섹션은 제목, 페이지는 소제목으로 정리"
-              onClick={() => setFormat("md")}
-            />
-            <FormatOption
-              active={format === "print"}
-              icon={<Printer size={21} />}
-              title="Print"
-              text="브라우저 인쇄 창을 바로 열 수 있는 출력 레이아웃"
-              onClick={() => setFormat("print")}
-            />
-          </div>
-
-          <p className="kicker scope-title">범위</p>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={selectedPageIds.size === allPageIds.size}
-              onChange={() => setSelectedPageIds(selectedPageIds.size === allPageIds.size ? new Set() : allPageIds)}
-            />
-            전체 프로젝트
-          </label>
-          {project.sections.map((section) => {
-            const sectionIds = section.pages.map((page) => page.id);
-            const checked = sectionIds.every((id) => selectedPageIds.has(id));
-            return (
-              <label className="check-row" key={section.id}>
-                <input type="checkbox" checked={checked} onChange={() => toggleSection(section.id)} />
-                {section.title.trim() || "구획 없는 노트"}
-              </label>
-            );
-          })}
-          <p className="hint">{selectedCount}개 페이지 선택됨</p>
-        </section>
-
-        <aside className="print-preview panel">
-          <div className="paper">
-            <h2>{project.name}</h2>
-            {project.sections.map((section) =>
-              section.pages
-                .filter((page) => selectedPageIds.has(page.id))
-                .map((page) => (
-                  <section className="print-page" key={page.id}>
-                    <b>
-                      P.{flattenPages(project).findIndex((item) => item.page.id === page.id) + 1}
-                      {section.title.trim() ? ` · ${section.title}` : ""}
-                    </b>
-                    <h3>{pageWord(page)}</h3>
-                    <p>{page.script || "원고 없음"}</p>
-                  </section>
-                ))
-            )}
-          </div>
-        </aside>
       </div>
-    </section>
-  );
-}
-
-function FormatOption({
-  active,
-  icon,
-  title,
-  text,
-  onClick
-}: {
-  active: boolean;
-  icon: React.ReactNode;
-  title: string;
-  text: string;
-  onClick: () => void;
-}) {
-  return (
-    <button className={`format-option ${active ? "active" : ""}`} onClick={onClick}>
-      <span className="file-icon">{icon}</span>
-      <span>
-        <strong>{title}</strong>
-        <small>{text}</small>
-      </span>
-    </button>
+    </div>
   );
 }
 
 function MemosView({
   project,
-  onUpdateProject
+  onSaveMemos,
+  onNavigate,
+  onDirtyChange,
+  saveRef
 }: {
   project: Project;
-  onUpdateProject: (updater: (project: Project) => Project) => void;
+  onSaveMemos: (projectMemos: Record<MemoKind, string>) => void;
+  onNavigate: (view: View) => void;
+  onDirtyChange: (dirty: boolean) => void;
+  saveRef: React.MutableRefObject<(() => void) | null>;
 }) {
   const [tab, setTab] = useState<MemoKind>("qa");
   const pagesWithMemos = flattenPages(project).filter((item) => item.page.memo.trim());
 
-  function setProjectMemo(value: string) {
-    onUpdateProject((current) => ({
-      ...current,
-      projectMemos: { ...current.projectMemos, [tab]: value }
-    }));
+  const saved = project.projectMemos;
+  // One draft per tab so switching tabs never loses unsaved text.
+  const [drafts, setDrafts] = useState<Record<MemoKind, string>>(() => ({ ...saved }));
+  const [showSavedModal, setShowSavedModal] = useState(false);
+
+  // Sync incoming Convex updates into drafts, but only for tabs the user hasn't
+  // diverged from the previously-saved value — in-progress edits are preserved.
+  const prevSavedRef = useRef(saved);
+  useEffect(() => {
+    const prev = prevSavedRef.current;
+    setDrafts((current) => {
+      const next = { ...current };
+      (Object.keys(saved) as MemoKind[]).forEach((key) => {
+        if (current[key] === prev[key]) next[key] = saved[key];
+      });
+      return next;
+    });
+    prevSavedRef.current = saved;
+  }, [saved.qa, saved.caution, saved.feedback]);
+
+  const dirty = (Object.keys(saved) as MemoKind[]).some((key) => drafts[key] !== saved[key]);
+
+  // Report dirty state to parent
+  useEffect(() => {
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
+
+  function handleSave() {
+    // Persist every tab in one write so no draft is left behind.
+    onSaveMemos({ ...saved, ...drafts });
+    setShowSavedModal(true);
   }
 
-  return (
-    <section className="screen-wrap">
-      <header className="page-header">
-        <div>
-          <p className="kicker">Memos</p>
-          <h1>스크립트와 분리된 발표 보조 노트</h1>
-          <p className="subcopy">예상 질문, 주의할 표현, 발표 피드백을 프로젝트 단위와 페이지 단위로 따로 보관합니다.</p>
-        </div>
-      </header>
+  // Expose save function to parent via ref
+  useEffect(() => {
+    saveRef.current = handleSave;
+    return () => { saveRef.current = null; };
+  });
 
+  return (
+    <section className="project-screen">
       <div className="memo-layout">
         <section className="panel memo-panel">
           <div className="tabs">
@@ -2655,29 +2741,51 @@ function MemosView({
             ))}
           </div>
           <div className="memo-editor">
-            <textarea value={project.projectMemos[tab]} onChange={(event) => setProjectMemo(event.target.value)} />
-            <div className="chips">
-              <span>심사위원 질문</span>
-              <span>40초 답변</span>
-              <span>숫자 근거 확인 필요</span>
+            <textarea
+              value={drafts[tab]}
+              onChange={(event) => setDrafts((current) => ({ ...current, [tab]: event.target.value }))}
+            />
+            <div className="memo-editor-footer">
+              <div className="chips">
+                <span>심사위원 질문</span>
+                <span>40초 답변</span>
+                <span>숫자 근거 확인 필요</span>
+              </div>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button className="btn" onClick={() => onNavigate("project")}>
+                  노트로 돌아가기
+                </button>
+                <button className="btn primary" onClick={handleSave}>
+                  저장
+                </button>
+              </div>
             </div>
           </div>
         </section>
 
         <aside className="panel page-note-panel">
-          <p className="kicker">페이지별 메모</p>
+          <p className="kicker">노트별 메모</p>
           {pagesWithMemos.map((item) => (
             <article className="page-note-card" key={item.page.id}>
-              <span className="note-tag">
-                P.{flattenPages(project).findIndex((pageItem) => pageItem.page.id === item.page.id) + 1}
-              </span>
               <strong>{item.page.title}</strong>
               <p>{item.page.memo}</p>
             </article>
           ))}
-          {!pagesWithMemos.length && <p className="hint">페이지 메모가 아직 없습니다.</p>}
+          {!pagesWithMemos.length && <p className="hint">노트 메모가 아직 없습니다.</p>}
         </aside>
       </div>
+
+      {showSavedModal && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal" style={{ maxWidth: 320, textAlign: "center", padding: "24px" }}>
+            <h2 style={{ fontSize: "20px", marginBottom: "12px" }}>저장 완료</h2>
+            <p style={{ color: "var(--muted)", marginBottom: "20px" }}>메모가 정상적으로 저장되었습니다.</p>
+            <button className="btn primary" onClick={() => setShowSavedModal(false)} style={{ width: "100%" }}>
+              확인
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -2722,7 +2830,7 @@ function SettingsView({
     {
       id: "noteTitle",
       label: "노트제목",
-      description: "구획 안에 들어가는 페이지 제목 목록입니다.",
+      description: "구획 안에 들어가는 노트 제목 목록입니다.",
       fontKey: "noteTitleFontFamily",
       sizeKey: "noteTitleTextSize",
       colorKey: "noteTitleTextColor",
@@ -2739,7 +2847,7 @@ function SettingsView({
     {
       id: "memo",
       label: "메모",
-      description: "페이지 하단 메모 행의 글자와 배경입니다.",
+      description: "노트 하단 메모 행의 글자와 배경입니다.",
       fontKey: "memoFontFamily",
       sizeKey: "memoTextSize",
       colorKey: "memoTextColor",
@@ -2748,7 +2856,7 @@ function SettingsView({
     {
       id: "link",
       label: "참고링크",
-      description: "페이지별 참고 링크 입력 행입니다.",
+      description: "노트별 참고 링크 입력 행입니다.",
       fontKey: "linkFontFamily",
       sizeKey: "linkTextSize",
       colorKey: "linkTextColor"
