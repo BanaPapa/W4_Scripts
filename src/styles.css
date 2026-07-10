@@ -30,6 +30,16 @@
   --note-content-font-family: Pretendard;
   --note-content-text-size: 23px;
   --note-content-text-color: #111827;
+  --combined-title-font-family: Pretendard;
+  --combined-title-text-size: 20px;
+  --combined-title-text-color: #111827;
+  --combined-content-font-family: Pretendard;
+  --combined-content-text-size: 19px;
+  --combined-content-text-color: #111827;
+  --page-num-font-family: Pretendard;
+  --page-num-text-size: 11px;
+  --page-num-text-color: #0d9488;
+  --memo-accent: #f59e0b;
   --memo-font-family: Pretendard;
   --memo-text-size: 17px;
   --memo-text-color: #667085;
@@ -43,6 +53,8 @@
   --page-memo-text-size: 17px;
   --page-memo-text-color: #667085;
   --page-memo-bg: #f4f5f7;
+  /* 갑지 행(accent 배경) 위에서 눈에 띄는 텍스트 색. 테마별로 재정의된다. */
+  --cover-title-text: #ffffff;
 }
 
 .theme-dark {
@@ -56,6 +68,11 @@
   --accent-weak: oklch(29% 0.045 185);
   --danger: oklch(70% 0.14 25);
   --shadow: 0 18px 48px rgba(0, 0, 0, 0.25);
+  --memo-bg: #20272e;
+  --note-bg: #171e24;
+  --memo-accent: #fbbf24;
+  /* 다크 테마의 accent는 밝은 청록이라 어두운 텍스트가 더 잘 보인다. */
+  --cover-title-text: oklch(18% 0.014 245);
   color-scheme: dark;
 }
 
@@ -113,6 +130,9 @@ button,
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   background: var(--bg);
+  /* 테마 변수는 .app-shell에서 바뀌므로 body에서 계산된 색을 상속받지 않도록
+     여기서 다시 선언해야 다크테마 글자색이 올바르게 적용된다. */
+  color: var(--fg);
 }
 
 .sidebar {
@@ -204,7 +224,7 @@ button,
   padding: 0 8px;
   color: var(--nav-text-color);
   font-family: var(--nav-font-family), var(--font-body);
-  font-size: 15px;
+  font-size: var(--nav-font-size);
   font-weight: 650;
   cursor: pointer;
   text-align: left;
@@ -262,9 +282,13 @@ button,
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 8px 0 16px;
-  color: var(--fg);
-  font-size: 13px;
+  /* 섹션 첫 글자가 프로젝트 이름의 첫 글자 위치에 오도록 들여쓴다.
+     43px = 프로젝트 행의 아이콘·여백 폭. */
+  padding: 0 8px 0 43px;
+  /* 설정 > 디자인변경 > 카테고리가 통제하는 영역 (트리의 섹션/폴더 제목). */
+  color: var(--section-text-color);
+  font-family: var(--section-font-family), var(--font-body);
+  font-size: var(--section-text-size);
   font-weight: 650;
   cursor: pointer;
   text-align: left;
@@ -317,8 +341,9 @@ button,
   min-height: 36px;
   border: 1px solid var(--border);
   border-radius: 8px;
+  /* 설정 > 디자인변경 > 노트제목이 통제하는 영역 (트리의 노트 제목 행). */
   background: var(--surface);
-  color: var(--muted);
+  color: var(--note-title-text-color);
   display: grid;
   grid-template-columns: 14px 34px minmax(0, 1fr) auto;
   align-items: center;
@@ -328,7 +353,8 @@ button,
   text-align: left;
   position: relative;
   box-shadow: none;
-  font-size: 12px;
+  font-family: var(--note-title-font-family), var(--font-body);
+  font-size: var(--note-title-text-size);
   transition: all 0.15s ease;
 }
 
@@ -375,15 +401,47 @@ button,
 
 .tree-page-num {
   font-weight: 700;
-  color: var(--accent);
-  font-size: 11px;
+  color: var(--page-num-text-color);
+  font-family: var(--page-num-font-family), var(--font-body);
+  font-size: var(--page-num-text-size);
 }
 
-.tree-page-num.memo-active {
-  color: var(--primary);
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+/* 메모 노트 행: "메모" 글자 대신 테두리 색으로 노트와 구분한다. */
+.nav-tree-page.memo-page {
+  border-color: color-mix(in oklch, var(--memo-accent) 55%, var(--border));
+}
+
+.nav-tree-page.memo-page:hover,
+.nav-tree-page.memo-page.active {
+  border-color: var(--memo-accent);
+}
+
+/* 갑지(타이틀 페이지) 행: 제목 영역을 테마 색으로 채워 부각한다. 페이지 번호는 유지. */
+.nav-tree-page.cover-page,
+.nav-tree-page.cover-page.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--cover-title-text);
+}
+
+.nav-tree-page.cover-page:hover {
+  background: color-mix(in oklch, var(--accent) 86%, var(--fg));
+  border-color: var(--accent);
+  color: var(--cover-title-text);
+}
+
+.nav-tree-page.cover-page .tree-page-num,
+.nav-tree-page.cover-page .tree-grip {
+  color: var(--cover-title-text);
+}
+
+/* 드롭 표시선: 채워진 배경 위에서는 accent가 안 보이므로 텍스트 색으로 그린다. */
+.nav-tree-page.cover-page.drop-before {
+  box-shadow: inset 0 2px 0 0 var(--cover-title-text);
+}
+
+.nav-tree-page.cover-page.drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--cover-title-text);
 }
 
 .tree-page-title {
@@ -1315,6 +1373,379 @@ button,
   resize: none;
 }
 
+.project-overview-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.78fr) minmax(0, 1.6fr);
+  align-items: stretch;
+  justify-content: stretch;
+  gap: 16px;
+  padding: 18px;
+  overflow: hidden;
+}
+
+.combined-script-panel {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.combined-script-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.combined-script-head h2 { margin: 2px 0 0; font-size: 22px; }
+.combined-script-head > span { color: var(--muted); font-size: 14px; }
+
+.combined-script-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.combined-script-meta .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.combined-script-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 24px 28px;
+}
+
+.combined-script-note {
+  padding: 20px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.combined-script-note:last-child { border-bottom: 0; }
+.combined-script-number { margin: 0 0 5px; color: var(--accent); font-weight: 750; font-size: 13px; }
+
+.combined-script-note h3 {
+  margin: 0 0 10px;
+  font-family: var(--combined-title-font-family), var(--font-body);
+  font-size: var(--combined-title-text-size);
+  color: var(--combined-title-text-color);
+}
+
+.combined-script-note > p:last-child {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.8;
+  font-family: var(--combined-content-font-family), var(--font-body);
+  font-size: var(--combined-content-text-size);
+  color: var(--combined-content-text-color);
+}
+
+.rich-text-editor {
+  min-height: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+}
+
+.rich-text-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.rt-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.rt-divider {
+  width: 1px;
+  height: 22px;
+  margin: 0 4px;
+  background: var(--border);
+}
+
+.rt-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 4px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.rt-btn:hover {
+  border-color: var(--border);
+  background: var(--surface);
+}
+
+.rt-btn.is-active {
+  border-color: color-mix(in oklch, var(--accent, #4472c4) 55%, var(--border));
+  background: color-mix(in oklch, var(--accent, #4472c4) 16%, var(--surface));
+}
+
+.rt-dropdown {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.rt-dropdown-toggle {
+  gap: 4px;
+}
+
+.rt-font-family .rt-font-label {
+  max-width: 96px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rt-size-input {
+  width: 40px;
+  height: 28px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px 0 0 5px;
+  background: var(--surface);
+  color: var(--fg);
+  font-size: 13px;
+  text-align: center;
+}
+
+.rt-font-size .rt-color-arrow {
+  border: 1px solid var(--border);
+  border-left: 0;
+  border-radius: 0 5px 5px 0;
+  min-width: 18px;
+}
+
+.rt-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 12px 30px color-mix(in oklch, #000 28%, transparent);
+}
+
+.rt-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  min-width: 130px;
+  max-height: 280px;
+  padding: 4px;
+  overflow-y: auto;
+}
+
+.rt-size-list {
+  min-width: 64px;
+}
+
+.rt-dropdown-item {
+  padding: 5px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rt-dropdown-item:hover {
+  background: var(--surface-2);
+}
+
+.rt-dropdown-item.is-active {
+  background: color-mix(in oklch, var(--accent, #4472c4) 18%, var(--surface));
+}
+
+.rt-color-split {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.rt-color-main {
+  position: relative;
+  flex-direction: column;
+  gap: 0;
+  padding: 2px 5px 4px;
+  border-radius: 5px 0 0 5px;
+}
+
+.rt-color-bar {
+  width: 16px;
+  height: 4px;
+  border-radius: 1px;
+  border: 1px solid color-mix(in oklch, var(--fg) 18%, transparent);
+}
+
+.rt-color-arrow {
+  min-width: 16px;
+  padding: 0 1px;
+  border-radius: 0 5px 5px 0;
+}
+
+.rt-color-popover {
+  width: 236px;
+}
+
+.rt-color-popover strong {
+  display: block;
+  margin: 6px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rt-color-grid {
+  display: grid;
+  gap: 3px;
+}
+
+.rt-color-grid-10 {
+  grid-template-columns: repeat(10, 1fr);
+}
+
+.rt-color-grid-5 {
+  grid-template-columns: repeat(5, 1fr);
+}
+
+.rt-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid color-mix(in oklch, var(--fg) 20%, transparent);
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.rt-swatch:hover {
+  outline: 2px solid var(--accent, #4472c4);
+  outline-offset: 1px;
+}
+
+.rt-swatch.is-active {
+  outline: 2px solid var(--accent, #4472c4);
+  outline-offset: 1px;
+}
+
+.rt-color-none {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.rt-auto-swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #000000;
+}
+
+.rt-custom-color {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.rt-custom-color input[type="color"] {
+  width: 32px;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.rt-line-height-icon {
+  font-size: 12px;
+  letter-spacing: -1px;
+}
+
+.rt-content {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.rt-content .ProseMirror {
+  outline: none;
+}
+
+.rt-content .ProseMirror p {
+  margin: 0;
+}
+
+.rt-content .ProseMirror ul,
+.rt-content .ProseMirror ol {
+  margin: 0;
+  padding-left: 1.6em;
+}
+
+.rt-content .ProseMirror mark {
+  color: inherit;
+}
+
+.rich-text-editor .script-editor {
+  flex: 1;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.rich-text-editor .memo-view-columns-2,
+.rich-text-editor .memo-view-columns-3,
+.rich-text-editor .memo-view-columns-4 {
+  column-gap: 28px;
+  column-fill: auto;
+  column-rule: 1px solid var(--border);
+}
+
+.rich-text-editor .memo-view-columns-2 { column-count: 2; }
+.rich-text-editor .memo-view-columns-3 { column-count: 3; }
+.rich-text-editor .memo-view-columns-4 { column-count: 4; }
+
 .page-details {
   border-top: 1px solid var(--border);
   padding: 12px 18px;
@@ -1628,7 +2059,90 @@ button,
   flex-direction: column;
 }
 
-.memo-editor textarea {
+.memo-split-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.memo-split-toolbar .btn {
+  padding: 6px 10px;
+}
+
+.memo-split-toolbar .btn.active {
+  background: var(--fg);
+  border-color: var(--fg);
+  color: var(--bg);
+}
+
+.memo-split-toolbar .btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.memo-toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0 3px;
+  background: var(--border);
+}
+
+.memo-page-editor {
+  min-height: 0;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+}
+
+.memo-page-editor .memo-split-toolbar {
+  flex: 0 0 auto;
+}
+
+.memo-merge-notice {
+  margin: -3px 0 10px;
+  color: var(--accent);
+  font-size: 14px;
+}
+
+.memo-columns {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.memo-columns.columns-1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.memo-columns.columns-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.memo-columns.columns-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.memo-column {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memo-column > span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.memo-column textarea {
   width: 100%;
   flex: 1;
   min-height: 0;
@@ -1638,6 +2152,37 @@ button,
   font-size: 21px;
   line-height: 1.65;
   resize: vertical;
+}
+
+.memo-page-column.script-editor {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+
+.memo-split-resizer {
+  position: relative;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.memo-split-resizer::before {
+  content: "";
+  position: absolute;
+  top: 26px;
+  bottom: 4px;
+  left: 50%;
+  width: 3px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--border);
+  transition: background 120ms ease, width 120ms ease;
+}
+
+.memo-split-resizer:hover::before,
+.memo-split-resizer:active::before {
+  width: 5px;
+  background: var(--accent);
 }
 
 .memo-editor-footer {
@@ -1925,7 +2470,6 @@ button,
 
   .script-editor {
     min-height: 420px;
-    font-size: 21px;
   }
 
   .page-details {
@@ -1996,7 +2540,7 @@ button,
   justify-content: center;
   gap: 8px;
   font-family: var(--nav-font-family), var(--font-body);
-  font-size: 16px;
+  font-size: calc(var(--nav-font-size) - 1px);
   font-weight: 700;
   cursor: pointer;
   box-shadow: 0 2px 8px color-mix(in oklch, var(--accent) 35%, transparent);

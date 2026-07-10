@@ -11,6 +11,12 @@
     "migrate:legacy": "tsx scripts/legacyMigration/run.ts"
   },
   "dependencies": {
+    "@tiptap/extension-highlight": "^3.27.3",
+    "@tiptap/extension-text-align": "^3.27.3",
+    "@tiptap/extension-text-style": "^3.27.3",
+    "@tiptap/pm": "^3.27.3",
+    "@tiptap/react": "^3.27.3",
+    "@tiptap/starter-kit": "^3.27.3",
     "@vitejs/plugin-react": "^5.1.2",
     "convex": "^1.42.1",
     "lucide-react": "^0.468.0",

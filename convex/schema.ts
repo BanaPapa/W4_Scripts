@@ -11,7 +11,10 @@ export const scriptPageValidator = v.object({
   // A page flagged as a memo is excluded from page numbering / duration / export
   // counts and rendered with a memo badge. Optional so existing docs (no flag)
   // stay valid and are treated as regular notes.
-  isMemo: v.optional(v.boolean())
+  isMemo: v.optional(v.boolean()),
+  // 갑지(타이틀 페이지): 페이지 번호 매기기에서 제외된다. Optional so existing
+  // docs (no flag) stay valid and are treated as regular notes.
+  isCover: v.optional(v.boolean())
 });
 
 export const scriptSectionValidator = v.object({
@@ -60,4 +63,8 @@ export default defineSchema({
     // Body text for memo-kind folders.
     memoText: v.optional(v.string())
   })
+    // 활성/휴지통 문서를 인덱스에서 바로 거른다. 인덱스 없이 collect() 후 JS로
+    // 필터하면 구독 쿼리가 재실행될 때마다(모든 patch마다) 테이블 전체 — 모든
+    // 프로젝트의 원고 본문 — 를 읽어 Database I/O가 폭증한다.
+    .index("by_deletedAt", ["deletedAt"])
 });

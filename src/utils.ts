@@ -1,5 +1,6 @@
 import * as XLSX from "xlsx";
 import type { Project, ScriptPage } from "./types";
+import { richTextPlain } from "./richText";
 
 export function flattenPages(project: Project) {
   return project.sections.flatMap((section) =>
@@ -16,10 +17,16 @@ export function isMemoPage(page: ScriptPage): boolean {
   return page.isMemo === true;
 }
 
+/** 갑지(PPT 타이틀 페이지). 트리에서 시각 효과만 다르고 페이지 번호는 일반 노트처럼 유지된다. */
+export function isCoverPage(page: ScriptPage): boolean {
+  return page.isCover === true;
+}
+
 /**
  * Global 1-based page numbers for every non-memo page, in document order.
- * Memo pages are skipped and never appear in the map. Use this everywhere a
- * page number is shown so the tree, editor and exports stay consistent.
+ * Memo pages are skipped and never appear in the map; cover(갑지) pages keep
+ * their number like regular notes. Use this everywhere a page number is shown
+ * so the tree, editor and exports stay consistent.
  */
 export function pageNumbers(project: Project): Map<string, number> {
   const numbers = new Map<string, number>();
@@ -49,7 +56,7 @@ export function countNotes(project: Project): number {
 
 export function estimateSeconds(project: Project) {
   const chars = flattenPages(project).reduce(
-    (sum, item) => (isMemoPage(item.page) ? sum : sum + item.page.script.length),
+    (sum, item) => (isMemoPage(item.page) ? sum : sum + richTextPlain(item.page.script).length),
     0
   );
   // Memo-only or empty projects have no non-memo script, so no time is shown.
@@ -126,7 +133,7 @@ export function makePrintHtml(project: Project, selectedPageIds: Set<string>): s
       blocks.push(
         `<section class="print-page"><div class="pg-label">${escapeHtml(label)}</div>` +
           `<h3>${escapeHtml(page.title || "제목 없음")}</h3>` +
-          `<p>${nl(page.script.trim() || "원고 없음")}</p>${memo}</section>`
+          `<p>${nl(richTextPlain(page.script).trim() || "원고 없음")}</p>${memo}</section>`
       );
     });
   });
@@ -155,8 +162,10 @@ export function makeMarkdown(project: Project, selectedPageIds: Set<string>) {
     if (!pages.length) return;
     if (section.title.trim()) lines.push(`## ${section.title}`, "");
     pages.forEach((page) => {
-      const heading = isMemoPage(page) ? `### [메모] ${page.title}` : `### P.${numbers.get(page.id)} ${page.title}`;
-      lines.push(heading, "", page.script.trim() || "_원고 없음_", "");
+      const heading = isMemoPage(page)
+        ? `### [메모] ${page.title}`
+        : `### P.${numbers.get(page.id)} ${page.title}`;
+      lines.push(heading, "", richTextPlain(page.script).trim() || "_원고 없음_", "");
       if (page.memo.trim()) lines.push(`> 메모: ${page.memo.trim()}`, "");
     });
   });
@@ -173,7 +182,7 @@ export function exportXlsx(project: Project, selectedPageIds: Set<string>) {
         Section: section.title,
         Page: isMemoPage(page) ? "메모" : (numbers.get(page.id) ?? ""),
         Title: page.title,
-        Script: page.script,
+        Script: richTextPlain(page.script),
         Memo: page.memo
       });
     });

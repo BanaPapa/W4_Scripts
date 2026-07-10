@@ -13,19 +13,27 @@ async function insertSeedProjects(ctx: MutationCtx) {
   }
 }
 
+// list/listTrash는 구독형이라 문서가 바뀔 때마다 재실행된다. 반드시 인덱스로
+// 필요한 문서만 읽어야 한다 — full collect()는 실행마다 전체 원고를 다 읽는다.
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    const all = await ctx.db.query("projects").collect();
-    return all.filter((project) => project.deletedAt === undefined);
+    return await ctx.db
+      .query("projects")
+      .withIndex("by_deletedAt", (q) => q.eq("deletedAt", undefined))
+      .collect();
   }
 });
 
 export const listTrash = query({
   args: {},
   handler: async (ctx) => {
-    const all = await ctx.db.query("projects").collect();
-    return all.filter((project) => project.deletedAt !== undefined);
+    // deletedAt이 undefined인 문서는 인덱스에서 모든 문자열보다 앞에 정렬되므로
+    // gt("")가 휴지통 문서(ISO 문자열)만 읽는다.
+    return await ctx.db
+      .query("projects")
+      .withIndex("by_deletedAt", (q) => q.gt("deletedAt", ""))
+      .collect();
   }
 });
 
@@ -45,8 +53,10 @@ export const create = mutation({
     labelColor: labelColorValidator
   },
   handler: async (ctx, args) => {
-    const all = await ctx.db.query("projects").collect();
-    const active = all.filter((project) => project.deletedAt === undefined);
+    const active = await ctx.db
+      .query("projects")
+      .withIndex("by_deletedAt", (q) => q.eq("deletedAt", undefined))
+      .collect();
     const order = active.reduce((max, project) => Math.max(max, project.order ?? 0), 0) + 1;
 
     // A project starts with one untitled section (rendered without a divider)
@@ -272,9 +282,11 @@ export const remove = mutation({
     const target = await ctx.db.get(id);
     if (!target) return;
     await ctx.db.patch(id, { deletedAt: new Date().toISOString() });
-    const all = await ctx.db.query("projects").collect();
-    const hasActive = all.some((project) => project.deletedAt === undefined && project._id !== id);
-    if (!hasActive) await insertSeedProjects(ctx);
+    const remainingActive = await ctx.db
+      .query("projects")
+      .withIndex("by_deletedAt", (q) => q.eq("deletedAt", undefined))
+      .first();
+    if (!remainingActive) await insertSeedProjects(ctx);
   }
 });
 

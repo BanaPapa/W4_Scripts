@@ -3,8 +3,9 @@ import {
   ChevronDown,
   ChevronsDownUp,
   ChevronsUpDown,
+  Copy,
   Download,
-  FileText,
+  FileDown,
   Folder,
   GripVertical,
   LayoutGrid,
@@ -15,6 +16,7 @@ import {
   Pencil,
   Pin,
   Plus,
+  Presentation,
   Search,
   Settings,
   Star,
@@ -35,6 +37,7 @@ import {
   flattenPages,
   formatDate,
   formatDuration,
+  isCoverPage,
   isMemoPage,
   makeMarkdown,
   makePrintHtml,
@@ -44,6 +47,8 @@ import {
   scopePageIds
 } from "./utils";
 import type { ExportScope } from "./utils";
+import { mergeRichText, richTextPlain } from "./richText";
+import { RichTextEditor } from "./editor/RichTextEditor";
 
 /** Sections with an empty title are implicit containers: their notes render
  *  directly under the project without a divider row. */
@@ -208,14 +213,21 @@ interface UISettings {
   noteTitleFontFamily: string;
   noteTitleTextSize: number;
   noteTitleTextColor: string;
-  noteBackgroundColor: string;
+  pageNumFontFamily: string;
+  pageNumTextSize: number;
+  pageNumTextColor: string;
   noteContentFontFamily: string;
   noteContentTextSize: number;
   noteContentTextColor: string;
+  combinedTitleFontFamily: string;
+  combinedTitleTextSize: number;
+  combinedTitleTextColor: string;
+  combinedContentFontFamily: string;
+  combinedContentTextSize: number;
+  combinedContentTextColor: string;
   memoFontFamily: string;
   memoTextSize: number;
   memoTextColor: string;
-  memoBackgroundColor: string;
   linkFontFamily: string;
   linkTextSize: number;
   linkTextColor: string;
@@ -237,14 +249,21 @@ const defaultUISettings: UISettings = {
   noteTitleFontFamily: "Pretendard",
   noteTitleTextSize: 17,
   noteTitleTextColor: "#111827",
-  noteBackgroundColor: "#ffffff",
+  pageNumFontFamily: "Pretendard",
+  pageNumTextSize: 11,
+  pageNumTextColor: "#0d9488",
   noteContentFontFamily: "Pretendard",
   noteContentTextSize: 23,
   noteContentTextColor: "#111827",
+  combinedTitleFontFamily: "Pretendard",
+  combinedTitleTextSize: 20,
+  combinedTitleTextColor: "#111827",
+  combinedContentFontFamily: "Pretendard",
+  combinedContentTextSize: 19,
+  combinedContentTextColor: "#111827",
   memoFontFamily: "Pretendard",
   memoTextSize: 17,
   memoTextColor: "#667085",
-  memoBackgroundColor: "#f4f5f7",
   linkFontFamily: "Pretendard",
   linkTextSize: 17,
   linkTextColor: "#667085",
@@ -253,14 +272,18 @@ const defaultUISettings: UISettings = {
   tagTextColor: "#667085"
 };
 
+const SIDEBAR_MIN_WIDTH = 196;
+const SIDEBAR_MAX_WIDTH = 640;
+
 const darkStyleDefaults = {
   navTextColor: "#d8dee8",
   categoryTextColor: "#a8b3c2",
   noteTitleTextColor: "#f8fafc",
-  noteBackgroundColor: "#171e24",
+  pageNumTextColor: "#2dd4bf",
   noteContentTextColor: "#f8fafc",
+  combinedTitleTextColor: "#f8fafc",
+  combinedContentTextColor: "#e2e8f0",
   memoTextColor: "#d1d8e0",
-  memoBackgroundColor: "#20272e",
   linkTextColor: "#9fb5d4",
   tagTextColor: "#d1d8e0"
 };
@@ -270,6 +293,28 @@ const memoLabels: Record<MemoKind, string> = {
   caution: "주의 사항",
   feedback: "피드백"
 };
+
+const memoPageSplitPrefix = "__PT_MEMO_PAGE_SPLIT_V1__";
+
+function decodeMemoPageColumns(value: string) {
+  if (!value.startsWith(memoPageSplitPrefix)) return [value];
+  try {
+    const columns = JSON.parse(value.slice(memoPageSplitPrefix.length));
+    return Array.isArray(columns) && columns.length > 0 && columns.every((column) => typeof column === "string")
+      ? columns.slice(0, 4)
+      : [value];
+  } catch {
+    return [value];
+  }
+}
+
+function encodeMemoPageColumns(columns: string[]) {
+  return columns.length === 1 ? columns[0] : `${memoPageSplitPrefix}${JSON.stringify(columns)}`;
+}
+
+function equalMemoColumnWidths(count: number) {
+  return Array.from({ length: count }, () => 100 / count);
+}
 
 function uid(prefix: string) {
   if ("randomUUID" in crypto) return `${prefix}-${crypto.randomUUID()}`;
@@ -301,14 +346,21 @@ function loadUISettings() {
       noteTitleFontFamily: parsed.noteTitleFontFamily ?? defaultUISettings.noteTitleFontFamily,
       noteTitleTextSize: parsed.noteTitleTextSize ?? parsed.noteTextSize ?? defaultUISettings.noteTitleTextSize,
       noteTitleTextColor: parsed.noteTitleTextColor ?? parsed.noteTextColor ?? defaultUISettings.noteTitleTextColor,
+      pageNumFontFamily: parsed.pageNumFontFamily ?? defaultUISettings.pageNumFontFamily,
+      pageNumTextSize: parsed.pageNumTextSize ?? defaultUISettings.pageNumTextSize,
+      pageNumTextColor: parsed.pageNumTextColor ?? defaultUISettings.pageNumTextColor,
       noteContentFontFamily: parsed.noteContentFontFamily ?? defaultUISettings.noteContentFontFamily,
       noteContentTextSize: parsed.noteContentTextSize ?? defaultUISettings.noteContentTextSize,
       noteContentTextColor: parsed.noteContentTextColor ?? defaultUISettings.noteContentTextColor,
+      combinedTitleFontFamily: parsed.combinedTitleFontFamily ?? defaultUISettings.combinedTitleFontFamily,
+      combinedTitleTextSize: parsed.combinedTitleTextSize ?? defaultUISettings.combinedTitleTextSize,
+      combinedTitleTextColor: parsed.combinedTitleTextColor ?? defaultUISettings.combinedTitleTextColor,
+      combinedContentFontFamily: parsed.combinedContentFontFamily ?? defaultUISettings.combinedContentFontFamily,
+      combinedContentTextSize: parsed.combinedContentTextSize ?? defaultUISettings.combinedContentTextSize,
+      combinedContentTextColor: parsed.combinedContentTextColor ?? defaultUISettings.combinedContentTextColor,
       memoFontFamily: parsed.memoFontFamily ?? defaultUISettings.memoFontFamily,
       memoTextSize: parsed.memoTextSize ?? parsed.pageMemoTextSize ?? defaultUISettings.memoTextSize,
       memoTextColor: parsed.memoTextColor ?? parsed.pageMemoTextColor ?? defaultUISettings.memoTextColor,
-      memoBackgroundColor:
-        parsed.memoBackgroundColor ?? parsed.pageMemoBackgroundColor ?? defaultUISettings.memoBackgroundColor,
       linkFontFamily: parsed.linkFontFamily ?? defaultUISettings.linkFontFamily,
       linkTextSize: parsed.linkTextSize ?? defaultUISettings.linkTextSize,
       linkTextColor: parsed.linkTextColor ?? defaultUISettings.linkTextColor,
@@ -355,9 +407,18 @@ function mapProjectDoc(doc: {
   };
 }
 
+// 원고 저장 디바운스. 키 입력마다 patch를 보내면 편집 1회가 (뮤테이션 1회 +
+// 구독 쿼리 재실행 × 전체 원고 읽기)로 증폭돼 Convex Database I/O가 폭증한다.
+const SAVE_DEBOUNCE_MS = 1000;
+// 연속 타이핑 중에도 이 시간을 넘기면 강제로 저장한다.
+const SAVE_MAX_WAIT_MS = 5000;
+
 export default function App() {
+  const [view, setView] = useState<View>("home");
   const projectsQuery = useQuery(api.projects.list);
-  const trashQuery = useQuery(api.projects.listTrash);
+  // 휴지통 목록은 휴지통 화면에서만 구독한다. 상시 구독하면 모든 patch마다
+  // 이 쿼리도 재실행되어 읽기 I/O가 두 배로 나간다.
+  const trashQuery = useQuery(api.projects.listTrash, view === "trash" ? {} : "skip");
   const createProjectMutation = useMutation(api.projects.create);
   const updateMetaMutation = useMutation(api.projects.updateMeta);
   const toggleFavoriteMutation = useMutation(api.projects.toggleFavorite);
@@ -390,10 +451,72 @@ export default function App() {
   const flattenHierarchyMutation = useMutation(api.projects.flattenHierarchy);
   const seedIfEmptyMutation = useMutation(api.projects.seedIfEmpty);
 
-  const projects: Project[] = useMemo(() => (projectsQuery ?? []).map(mapProjectDoc), [projectsQuery]);
+  // 저장 대기 중인 sections. UI가 이 값을 서버 값보다 우선 사용하므로 타이핑은
+  // 즉시 화면에 반영되고, 서버 저장만 디바운스된다.
+  const pendingSectionsRef = useRef<Map<Id<"projects">, ScriptSection[]>>(new Map());
+  // ref 내용이 바뀌었음을 useMemo에 알리는 카운터.
+  const [pendingVersion, setPendingVersion] = useState(0);
+  const saveTimerRef = useRef<number | null>(null);
+  const firstPendingAtRef = useRef<number | null>(null);
+
+  function flushPendingSections() {
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    firstPendingAtRef.current = null;
+    if (pendingSectionsRef.current.size === 0) return;
+    const entries = [...pendingSectionsRef.current.entries()];
+    pendingSectionsRef.current.clear();
+    // patch의 optimistic update가 로컬 쿼리 결과에 동기로 반영되므로 pending을
+    // 비워도 화면이 이전 값으로 되돌아가지 않는다.
+    for (const [id, sections] of entries) {
+      patchProjectMutation({ id, sections });
+    }
+    setPendingVersion((version) => version + 1);
+  }
+
+  const flushRef = useRef(flushPendingSections);
+  flushRef.current = flushPendingSections;
+
+  function queueSectionsSave(projectId: Id<"projects">, sections: ScriptSection[]) {
+    pendingSectionsRef.current.set(projectId, sections);
+    setPendingVersion((version) => version + 1);
+    const now = Date.now();
+    if (firstPendingAtRef.current === null) firstPendingAtRef.current = now;
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    const waited = now - firstPendingAtRef.current;
+    const delay = Math.min(SAVE_DEBOUNCE_MS, Math.max(0, SAVE_MAX_WAIT_MS - waited));
+    saveTimerRef.current = window.setTimeout(() => flushRef.current(), delay);
+  }
+
+  // 탭을 닫거나 백그라운드로 보낼 때 대기 중인 편집을 즉시 저장한다.
+  useEffect(() => {
+    const flush = () => flushRef.current();
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("beforeunload", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
+
+  const projects: Project[] = useMemo(
+    () =>
+      (projectsQuery ?? []).map((doc) => {
+        const mapped = mapProjectDoc(doc);
+        const pending = pendingSectionsRef.current.get(doc._id);
+        return pending ? { ...mapped, sections: pending } : mapped;
+      }),
+    // pendingVersion은 pendingSectionsRef가 바뀔 때마다 증가한다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectsQuery, pendingVersion]
+  );
   const trashedProjects: Project[] = useMemo(() => (trashQuery ?? []).map(mapProjectDoc), [trashQuery]);
 
-  const [view, setView] = useState<View>("home");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [mode, setMode] = useState<"grid" | "list">("grid");
   const [activeProjectId, setActiveProjectId] = useState<Id<"projects"> | "">("");
@@ -494,7 +617,7 @@ export default function App() {
       setUISettings((current) => ({
         ...current,
         navCollapsed: false,
-        sidebarWidth: Math.min(420, Math.max(196, event.clientX))
+        sidebarWidth: Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, event.clientX))
       }));
     }
     function onUp() {
@@ -524,7 +647,7 @@ export default function App() {
     const project = projects.find((item) => item.id === projectId);
     if (!project) return;
     const next = updater(project);
-    patchProjectMutation({ id: projectId, sections: next.sections });
+    queueSectionsSave(projectId, next.sections);
   }
 
   // Dedicated path for saving project-level memos: sends only projectMemos.
@@ -546,7 +669,7 @@ export default function App() {
         ...section,
         collapsed: section.pages.some((page) => page.id === pageId) ? false : section.collapsed
       }));
-      patchProjectMutation({ id: projectId, sections });
+      queueSectionsSave(projectId, sections);
     }
     setActiveProjectId(projectId);
     setSelectedPageId(pageId);
@@ -625,7 +748,7 @@ export default function App() {
             : section
         )
       : [{ id: uid("section"), title: "", collapsed: false, pages: [page] }];
-    patchProjectMutation({ id: projectId, sections });
+    queueSectionsSave(projectId, sections);
     setActiveProjectId(projectId);
     setSelectedPageId(page.id);
     setView("project");
@@ -637,6 +760,8 @@ export default function App() {
   }
 
   function handleDeleteProject(id: Id<"projects">) {
+    // 대기 중인 편집을 먼저 저장해 휴지통에서 복원해도 내용이 유지되게 한다.
+    flushPendingSections();
     removeProjectMutation({ id });
   }
 
@@ -645,6 +770,8 @@ export default function App() {
   }
 
   function handlePermanentlyDeleteProject(id: Id<"projects">) {
+    // 곧 사라질 문서에 대한 대기 저장은 버린다 (patch가 없는 id로 나가면 에러).
+    pendingSectionsRef.current.delete(id);
     permanentlyDeleteProjectMutation({ id });
   }
 
@@ -696,17 +823,33 @@ export default function App() {
       defaultUISettings.noteTitleTextColor,
       darkStyleDefaults.noteTitleTextColor
     ),
-    "--note-bg":
-      uiSettings.theme === "dark" &&
-      uiSettings.noteBackgroundColor.toLowerCase() === defaultUISettings.noteBackgroundColor.toLowerCase()
-        ? darkStyleDefaults.noteBackgroundColor
-        : uiSettings.noteBackgroundColor,
+    "--page-num-font-family": uiSettings.pageNumFontFamily,
+    "--page-num-text-size": `${uiSettings.pageNumTextSize}px`,
+    "--page-num-text-color": themedColor(
+      uiSettings.pageNumTextColor,
+      defaultUISettings.pageNumTextColor,
+      darkStyleDefaults.pageNumTextColor
+    ),
     "--note-content-font-family": uiSettings.noteContentFontFamily,
     "--note-content-text-size": `${uiSettings.noteContentTextSize}px`,
     "--note-content-text-color": themedColor(
       uiSettings.noteContentTextColor,
       defaultUISettings.noteContentTextColor,
       darkStyleDefaults.noteContentTextColor
+    ),
+    "--combined-title-font-family": uiSettings.combinedTitleFontFamily,
+    "--combined-title-text-size": `${uiSettings.combinedTitleTextSize}px`,
+    "--combined-title-text-color": themedColor(
+      uiSettings.combinedTitleTextColor,
+      defaultUISettings.combinedTitleTextColor,
+      darkStyleDefaults.combinedTitleTextColor
+    ),
+    "--combined-content-font-family": uiSettings.combinedContentFontFamily,
+    "--combined-content-text-size": `${uiSettings.combinedContentTextSize}px`,
+    "--combined-content-text-color": themedColor(
+      uiSettings.combinedContentTextColor,
+      defaultUISettings.combinedContentTextColor,
+      darkStyleDefaults.combinedContentTextColor
     ),
     "--memo-font-family": uiSettings.memoFontFamily,
     "--memo-text-size": `${uiSettings.memoTextSize}px`,
@@ -715,22 +858,6 @@ export default function App() {
       defaultUISettings.memoTextColor,
       darkStyleDefaults.memoTextColor
     ),
-    "--memo-bg":
-      uiSettings.theme === "dark" &&
-      uiSettings.memoBackgroundColor.toLowerCase() === defaultUISettings.memoBackgroundColor.toLowerCase()
-        ? darkStyleDefaults.memoBackgroundColor
-        : uiSettings.memoBackgroundColor,
-    "--page-memo-text-size": `${uiSettings.memoTextSize}px`,
-    "--page-memo-text-color": themedColor(
-      uiSettings.memoTextColor,
-      defaultUISettings.memoTextColor,
-      darkStyleDefaults.memoTextColor
-    ),
-    "--page-memo-bg":
-      uiSettings.theme === "dark" &&
-      uiSettings.memoBackgroundColor.toLowerCase() === defaultUISettings.memoBackgroundColor.toLowerCase()
-        ? darkStyleDefaults.memoBackgroundColor
-        : uiSettings.memoBackgroundColor,
     "--link-font-family": uiSettings.linkFontFamily,
     "--link-text-size": `${uiSettings.linkTextSize}px`,
     "--link-text-color": themedColor(
@@ -1055,14 +1182,22 @@ function NavTreePageButton({
   onDragEnd: () => void;
   onContextMenu: (event: MouseEvent<HTMLElement>) => void;
 }) {
-  // Only arm HTML5 dragging while the grip handle is pressed. Keeping the whole
-  // button `draggable` made Chromium hijack the smallest pointer movement into a
-  // drag, swallowing the click/dblclick that toggles note <-> memo.
+  // Arm HTML5 dragging only after the pointer actually moves while pressed, so
+  // grabbing anywhere on the row starts a drag. Keeping the button always
+  // `draggable` made Chromium hijack the smallest pointer movement into a drag,
+  // swallowing the click/dblclick that toggles note <-> memo.
   const [dragArmed, setDragArmed] = useState(false);
+  const pressOrigin = useRef<{ x: number; y: number } | null>(null);
+
+  function disarmDrag() {
+    pressOrigin.current = null;
+    setDragArmed(false);
+  }
+
   return (
     <button
       type="button"
-      className={`nav-tree-page ${selected ? "active" : ""} ${dropClass}`}
+      className={`nav-tree-page ${isMemoPage(page) ? "memo-page" : ""} ${isCoverPage(page) ? "cover-page" : ""} ${selected ? "active" : ""} ${dropClass}`}
       onClick={onSelect}
       onDoubleClick={onToggleMemo}
       title={pageWord(page)}
@@ -1072,20 +1207,30 @@ function NavTreePageButton({
       onDrop={onDrop}
       onDragEnd={() => {
         onDragEnd();
-        setDragArmed(false);
+        disarmDrag();
       }}
-      onMouseUp={() => setDragArmed(false)}
-      onMouseLeave={() => setDragArmed(false)}
+      onMouseDown={(event) => {
+        pressOrigin.current = { x: event.clientX, y: event.clientY };
+      }}
+      onMouseMove={(event) => {
+        if (!pressOrigin.current || dragArmed) return;
+        if (event.buttons !== 1) {
+          pressOrigin.current = null;
+          return;
+        }
+        const moved =
+          Math.abs(event.clientX - pressOrigin.current.x) + Math.abs(event.clientY - pressOrigin.current.y);
+        if (moved > 3) setDragArmed(true);
+      }}
+      onMouseUp={disarmDrag}
+      onMouseLeave={disarmDrag}
       onContextMenu={onContextMenu}
     >
-      <span className="tree-grip-handle" onMouseDown={() => setDragArmed(true)}>
+      <span className="tree-grip-handle">
         <GripVertical size={13} className="tree-grip" />
       </span>
       {isMemoPage(page) ? (
-        <span className="tree-page-num memo-active">
-          <FileText size={12} />
-          메모
-        </span>
+        <span className="tree-page-num" aria-label="메모" />
       ) : (
         <span className="tree-page-num">P.{pageNum}</span>
       )}
@@ -1152,7 +1297,7 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     const sectionId = itemMenu.sectionId;
     const current = project.sections.find((section) => section.id === sectionId);
     setItemMenu(null);
-    const title = window.prompt("구획 이름", current?.title ?? "");
+    const title = window.prompt("섹션 이름", current?.title ?? "");
     if (!title?.trim()) return;
     ctx.onUpdateProject(project.id, (proj) => ({
       ...proj,
@@ -1196,8 +1341,8 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
       [page.title, page.script, page.memo, ...(page.referenceLinks ?? []), ...(page.tags ?? [])].some((value) => value.trim())
     );
     const message = hasContent
-      ? `"${section.title}" 구획 안에 작성된 노트가 있습니다. 구획과 포함된 노트를 삭제할까요?`
-      : `"${section.title}" 구획을 삭제할까요?`;
+      ? `"${section.title}" 섹션 안에 작성된 노트가 있습니다. 섹션과 포함된 노트를 삭제할까요?`
+      : `"${section.title}" 섹션을 삭제할까요?`;
     if (!window.confirm(message)) return;
     
     ctx.onUpdateProject(project.id, (current) => ({
@@ -1239,7 +1384,7 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     if (!itemMenu || itemMenu.type !== "page" || !itemMenu.pageId) return;
     const { sectionId, pageId } = itemMenu;
     setItemMenu(null);
-    const title = window.prompt("새 구획 이름", "새 구획");
+    const title = window.prompt("새 섹션 이름", "새 섹션");
     if (!title?.trim()) return;
     ctx.onUpdateProject(project.id, (proj) => {
       const sections: ScriptSection[] = [];
@@ -1263,7 +1408,53 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
 
   // Flip a note between note and memo. The current value is read from the live
   // project so the label/behavior always matches the stored flag.
+  // 노트 → 메모 전환 시에는 항상 프로젝트 마지막의 "메모" 섹션으로 이동한다
+  // (없으면 맨 뒤에 새로 만들고, 있으면 그 섹션의 맨 뒤에 붙인다).
   function togglePageMemo(sectionId: string, pageId: string) {
+    ctx.onUpdateProject(project.id, (current) => {
+      const sourceSection = current.sections.find((section) => section.id === sectionId);
+      const page = sourceSection?.pages.find((item) => item.id === pageId);
+      if (!page) return current;
+
+      if (isMemoPage(page)) {
+        // 메모 → 노트: 자리 이동 없이 플래그만 되돌린다.
+        return {
+          ...current,
+          sections: current.sections.map((section) =>
+            section.id === sectionId
+              ? {
+                  ...section,
+                  pages: section.pages.map((item) => (item.id === pageId ? { ...item, isMemo: false } : item))
+                }
+              : section
+          )
+        };
+      }
+
+      const memoPage: ScriptPage = { ...page, isMemo: true };
+      const withoutPage = current.sections.map((section) =>
+        section.id === sectionId
+          ? { ...section, pages: section.pages.filter((item) => item.id !== pageId) }
+          : section
+      );
+      const memoSection = withoutPage.find((section) => section.title.trim() === "메모");
+      if (memoSection) {
+        return {
+          ...current,
+          sections: withoutPage.map((section) =>
+            section.id === memoSection.id ? { ...section, pages: [...section.pages, memoPage] } : section
+          )
+        };
+      }
+      return {
+        ...current,
+        sections: [...withoutPage, { id: uid("section"), title: "메모", collapsed: false, pages: [memoPage] }]
+      };
+    });
+  }
+
+  // 갑지 토글: 트리 행의 시각 효과만 바뀌고 페이지 번호는 그대로 유지된다.
+  function togglePageCover(sectionId: string, pageId: string) {
     ctx.onUpdateProject(project.id, (current) => ({
       ...current,
       sections: current.sections.map((section) =>
@@ -1271,7 +1462,7 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
           ? {
               ...section,
               pages: section.pages.map((page) =>
-                page.id === pageId ? { ...page, isMemo: !isMemoPage(page) } : page
+                page.id === pageId ? { ...page, isCover: !isCoverPage(page) } : page
               )
             }
           : section
@@ -1279,11 +1470,11 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     }));
   }
 
-  function toggleMemoFromMenu() {
+  function toggleCoverFromMenu() {
     if (!itemMenu || itemMenu.type !== "page" || !itemMenu.pageId) return;
     const { sectionId, pageId } = itemMenu;
     setItemMenu(null);
-    togglePageMemo(sectionId, pageId);
+    togglePageCover(sectionId, pageId);
   }
 
   function deletePageFromMenu() {
@@ -1424,7 +1615,7 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
     itemMenu?.type === "page" && itemMenu.pageId
       ? project.sections.flatMap((section) => section.pages).find((page) => page.id === itemMenu.pageId)
       : undefined;
-  const menuTargetIsMemo = menuTargetPage ? isMemoPage(menuTargetPage) : false;
+  const menuTargetIsCover = menuTargetPage ? isCoverPage(menuTargetPage) : false;
 
   return (
     <div className="nav-tree-project">
@@ -1511,10 +1702,36 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
 
       {expanded && (
         <div className="nav-children">
-          {/* First, render all divider sections (sections with titles) */}
+          {/* 섹션은 데이터 순서 그대로 렌더링한다(페이지 번호 순서와 일치).
+              제목 없는(암시적) 섹션은 구분 행 없이 페이지만 보여준다. */}
           {project.sections.map((section) => {
-            const divider = isDividerSection(section);
-            if (!divider) return null;
+            if (!isDividerSection(section)) {
+              if (section.pages.length === 0) return null;
+              return (
+                <div className="nav-page-list implicit" key={section.id}>
+                  {section.pages.map((page) => {
+                    return (
+                      <NavTreePageButton
+                        key={page.id}
+                        page={page}
+                        pageNum={pageNumberMap.get(page.id)}
+                        selected={isActive && page.id === ctx.selectedPageId}
+                        dropClass={treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""}
+                        onSelect={() => ctx.onSelectTreePage(project.id, page.id)}
+                        onToggleMemo={() => togglePageMemo(section.id, page.id)}
+                        onDragStart={(event) =>
+                          onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
+                        }
+                        onDragOver={(event) => onPageDragOver(page.id, event)}
+                        onDrop={(event) => onPageDrop(section.id, page.id, event)}
+                        onDragEnd={onTreeDragEnd}
+                        onContextMenu={(event) => onPageContextMenu(section, page, event)}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            }
             return (
               <Fragment key={section.id}>
                 <button
@@ -1561,36 +1778,6 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
               </Fragment>
             );
           })}
-          {/* Then, render pages from implicit sections (sections with empty titles) */}
-          {project.sections.map((section) => {
-            const divider = isDividerSection(section);
-            if (divider) return null;
-            if (section.pages.length === 0) return null;
-            return (
-              <div className="nav-page-list implicit" key={section.id}>
-                {section.pages.map((page) => {
-                  return (
-                    <NavTreePageButton
-                      key={page.id}
-                      page={page}
-                      pageNum={pageNumberMap.get(page.id)}
-                      selected={isActive && page.id === ctx.selectedPageId}
-                      dropClass={treeDrop?.key === `page:${page.id}` ? `drop-${treeDrop.mode}` : ""}
-                      onSelect={() => ctx.onSelectTreePage(project.id, page.id)}
-                      onToggleMemo={() => togglePageMemo(section.id, page.id)}
-                      onDragStart={(event) =>
-                        onTreeItemDragStart({ type: "page", sectionId: section.id, pageId: page.id }, event)
-                      }
-                      onDragOver={(event) => onPageDragOver(page.id, event)}
-                      onDrop={(event) => onPageDrop(section.id, page.id, event)}
-                      onDragEnd={onTreeDragEnd}
-                      onContextMenu={(event) => onPageContextMenu(section, page, event)}
-                    />
-                  );
-                })}
-              </div>
-            );
-          })}
         </div>
       )}
       {itemMenu && (
@@ -1615,7 +1802,7 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
               <>
                 <button type="button" role="menuitem" className="context-menu-item" onClick={renameSectionFromMenu}>
                   <Pencil size={14} />
-                  구획 이름 변경
+                  섹션 이름 변경
                 </button>
                 <button type="button" role="menuitem" className="context-menu-item" onClick={addNoteToSectionFromMenu}>
                   <Plus size={14} />
@@ -1623,22 +1810,22 @@ function NavProjectNode({ project, ctx }: { project: Project; ctx: NavCtx }) {
                 </button>
                 <button type="button" role="menuitem" className="context-menu-item" onClick={dissolveSectionFromMenu}>
                   <Trash2 size={14} />
-                  구획 해제 (노트 유지)
+                  섹션 해제 (노트 유지)
                 </button>
                 <button type="button" role="menuitem" className="context-menu-item danger" onClick={deleteSectionFromMenu}>
                   <Trash2 size={14} />
-                  구획 및 노트 전체 삭제
+                  섹션 및 노트 전체 삭제
                 </button>
               </>
             ) : (
               <>
                 <button type="button" role="menuitem" className="context-menu-item" onClick={splitSectionFromMenu}>
                   <Plus size={14} />
-                  여기부터 새 구획
+                  여기부터 새 섹션
                 </button>
-                <button type="button" role="menuitem" className="context-menu-item" onClick={toggleMemoFromMenu}>
-                  {menuTargetIsMemo ? <FileText size={14} /> : <Pin size={14} />}
-                  {menuTargetIsMemo ? "노트로 전환" : "메모로 전환"}
+                <button type="button" role="menuitem" className="context-menu-item" onClick={toggleCoverFromMenu}>
+                  <Presentation size={14} />
+                  {menuTargetIsCover ? "갑지 해제" : "갑지 변경"}
                 </button>
                 <button type="button" role="menuitem" className="context-menu-item danger" onClick={deletePageFromMenu}>
                   <Trash2 size={14} />
@@ -1910,13 +2097,13 @@ function Sidebar({
                   onClick={() => {
                     onUpdateProject(target.id, (proj) => ({
                       ...proj,
-                      sections: [...proj.sections, { id: uid("section"), title: "새 구획", collapsed: false, pages: [] }]
+                      sections: [...proj.sections, { id: uid("section"), title: "새 섹션", collapsed: false, pages: [] }]
                     }));
                     setContextMenu(null);
                   }}
                 >
                   <Plus size={14} />
-                  구획 추가
+                  섹션 추가
                 </button>
                 <button
                   type="button"
@@ -2023,7 +2210,7 @@ function GlobalSearch({
           const titleAcc = getFieldAccuracy(page.title, normalizedQuery);
           const sectAcc = getFieldAccuracy(section.title, normalizedQuery);
           const contentAcc = Math.max(
-            getFieldAccuracy(page.script, normalizedQuery),
+            getFieldAccuracy(richTextPlain(page.script), normalizedQuery),
             getFieldAccuracy(page.memo, normalizedQuery),
             ...(page.referenceLinks ?? []).map((link) => getFieldAccuracy(link, normalizedQuery)),
             -1
@@ -2033,7 +2220,7 @@ function GlobalSearch({
             { type: "프로젝트명", score: projAcc >= 0 ? projAcc + 3.0 : -1 },
             { type: "태그", score: tagAcc >= 0 ? tagAcc + 2.0 : -1 },
             { type: "노트 제목", score: titleAcc >= 0 ? titleAcc + 1.0 : -1 },
-            { type: "구획명", score: sectAcc >= 0 ? sectAcc + 0.5 : -1 },
+            { type: "섹션명", score: sectAcc >= 0 ? sectAcc + 0.5 : -1 },
             { type: "본문/메모", score: contentAcc >= 0 ? contentAcc + 0.0 : -1 }
           ];
 
@@ -2355,6 +2542,7 @@ function CreateProjectModal({
   );
 }
 
+
 function ProjectDetail({
   project,
   selectedPageId,
@@ -2372,6 +2560,9 @@ function ProjectDetail({
 }) {
   const [detailOpen, setDetailOpen] = useState({ memo: false, links: false, tags: false });
   const [tagDraft, setTagDraft] = useState("");
+  const [memoColumnWidths, setMemoColumnWidths] = useState<number[]>([]);
+  const [memoViewCount, setMemoViewCount] = useState(1);
+  const memoColumnsRef = useRef<HTMLDivElement | null>(null);
   const flatPages = flattenPages(project);
   const selected = selectedPageId ? flatPages.find((item) => item.page.id === selectedPageId) : undefined;
   const selectedPage = selected?.page;
@@ -2427,7 +2618,115 @@ function ProjectDetail({
   }
 
   const totalSeconds = estimateSeconds(project);
+  const combinedNotes = flattenPages(project).filter((item) => !isMemoPage(item.page));
+  const combinedNumbers = pageNumbers(project);
+  const combinedLabel = (page: ScriptPage) => `P.${combinedNumbers.get(page.id) ?? "?"}`;
+  const [combinedCopied, setCombinedCopied] = useState(false);
+
+  async function copyCombinedScript() {
+    const text = combinedNotes
+      .map((item) => {
+        const title = item.page.title.trim() || "제목 없는 노트";
+        const script = richTextPlain(item.page.script).trim() || "원고 없음";
+        return `${combinedLabel(item.page)} ${title}\n\n${script}`;
+      })
+      .join("\n\n\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // 클립보드 API를 쓸 수 없는 환경(http 등)에서는 임시 textarea로 복사한다.
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    setCombinedCopied(true);
+    window.setTimeout(() => setCombinedCopied(false), 2000);
+  }
   const selectedIsMemo = selectedPage ? isMemoPage(selectedPage) : false;
+  const memoPageColumns = selectedIsMemo && selectedPage ? decodeMemoPageColumns(selectedPage.script) : [];
+  const activeMemoColumnWidths =
+    memoColumnWidths.length === memoPageColumns.length ? memoColumnWidths : equalMemoColumnWidths(memoPageColumns.length);
+
+  useEffect(() => {
+    if (!selectedIsMemo || !selectedPage) return;
+    const storageKey = `pt-memo-column-widths:${selectedPage.id}:${memoPageColumns.length}`;
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(storageKey) ?? "null");
+      if (Array.isArray(stored) && stored.length === memoPageColumns.length && stored.every((width) => typeof width === "number" && width > 0)) {
+        setMemoColumnWidths(stored);
+        return;
+      }
+    } catch {
+      // Invalid saved sizing falls back to evenly sized columns.
+    }
+    setMemoColumnWidths(equalMemoColumnWidths(memoPageColumns.length));
+  }, [selectedIsMemo, selectedPage?.id, memoPageColumns.length]);
+
+  useEffect(() => {
+    setMemoViewCount(1);
+  }, [selectedPage?.id]);
+
+  function updateMemoPageColumn(columnIndex: number, value: string) {
+    const columns = [...memoPageColumns];
+    columns[columnIndex] = value;
+    updateSelectedPage({ script: encodeMemoPageColumns(columns) });
+  }
+
+  function setMemoPageSplitCount(count: number) {
+    const columns = [...memoPageColumns];
+    while (columns.length < count) columns.push("");
+    while (columns.length > count) {
+      const lastColumn = columns.pop() ?? "";
+      const previousIndex = columns.length - 1;
+      columns[previousIndex] = mergeRichText(columns[previousIndex], lastColumn);
+    }
+    if (count > 1) setMemoViewCount(1);
+    updateSelectedPage({ script: encodeMemoPageColumns(columns) });
+  }
+
+  function startMemoColumnResize(index: number, event: React.PointerEvent<HTMLDivElement>) {
+    const container = memoColumnsRef.current;
+    if (!container) return;
+    const startX = event.clientX;
+    const startWidths = [...activeMemoColumnWidths];
+    let finalWidths = startWidths;
+    const minWidth = 14;
+    const storageKey = `pt-memo-column-widths:${selectedPage?.id}:${memoPageColumns.length}`;
+    const handle = event.currentTarget;
+    handle.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      const availableWidth = container.getBoundingClientRect().width - (memoPageColumns.length - 1) * 12;
+      if (availableWidth <= 0) return;
+      const delta = ((moveEvent.clientX - startX) / availableWidth) * 100;
+      const left = startWidths[index] + delta;
+      const right = startWidths[index + 1] - delta;
+      if (left < minWidth || right < minWidth) return;
+      const next = [...startWidths];
+      next[index] = left;
+      next[index + 1] = right;
+      finalWidths = next;
+      setMemoColumnWidths(next);
+    };
+
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(finalWidths));
+      } catch {
+        // The resize still works if browser storage is unavailable.
+      }
+    };
+
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp, { once: true });
+  }
 
   return (
     <section className="project-screen">
@@ -2443,12 +2742,78 @@ function ProjectDetail({
                   aria-label="노트 제목"
                 />
               </div>
-              <textarea
-                className="script-editor"
-                value={selectedPage.script}
-                onChange={(event) => updateSelectedPage({ script: event.target.value })}
-                aria-label="발표 원고"
-              />
+              {selectedIsMemo ? (
+                <div className="memo-page-editor">
+                  <div className="memo-split-toolbar">
+                    <span>세로 분할</span>
+                    {[1, 2, 3, 4].map((count) => (
+                      <button
+                        key={count}
+                        type="button"
+                        className={`btn subtle ${memoPageColumns.length === count ? "active" : ""}`}
+                        onClick={() => setMemoPageSplitCount(count)}
+                      >
+                        {count === 1 ? "없음" : `${count}분할`}
+                      </button>
+                    ))}
+                    <span className="memo-toolbar-divider" />
+                    <span>뷰</span>
+                    {[1, 2, 3, 4].map((count) => (
+                      <button
+                        key={`view-${count}`}
+                        type="button"
+                        disabled={memoPageColumns.length !== 1}
+                        className={`btn subtle ${memoViewCount === count ? "active" : ""}`}
+                        onClick={() => setMemoViewCount(count)}
+                        title={memoPageColumns.length === 1 ? `한 메모를 ${count}개 뷰로 연속 표시` : "뷰 분리는 분할 없음에서만 사용할 수 있습니다."}
+                      >
+                        {count === 1 ? "없음" : `${count}뷰`}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    ref={memoColumnsRef}
+                    className={`memo-columns columns-${memoPageColumns.length}`}
+                    style={{
+                      gridTemplateColumns: memoPageColumns.flatMap((_, index) =>
+                        index === memoPageColumns.length - 1
+                          ? [`minmax(0, ${activeMemoColumnWidths[index]}fr)`]
+                          : [`minmax(0, ${activeMemoColumnWidths[index]}fr)`, "12px"]
+                      ).join(" ")
+                    }}
+                  >
+                    {memoPageColumns.map((column, index) => (
+                      <Fragment key={index}>
+                        <label className="memo-column">
+                          <span>메모 {index + 1}</span>
+                          <RichTextEditor
+                            className={`script-editor memo-page-column ${memoPageColumns.length === 1 ? `memo-view-columns-${memoViewCount}` : ""}`}
+                            value={column}
+                            onChange={(value) => updateMemoPageColumn(index, value)}
+                            ariaLabel={`메모 ${index + 1}`}
+                          />
+                        </label>
+                        {index < memoPageColumns.length - 1 && (
+                          <div
+                            className="memo-split-resizer"
+                            role="separator"
+                            aria-orientation="vertical"
+                            aria-label={`메모 ${index + 1}과 메모 ${index + 2}의 너비 조절`}
+                            onPointerDown={(event) => startMemoColumnResize(index, event)}
+                          />
+                        )}
+                      </Fragment>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <RichTextEditor
+                  className="script-editor"
+                  value={selectedPage.script}
+                  onChange={(value) => updateSelectedPage({ script: value })}
+                  ariaLabel="발표 원고"
+                />
+              )}
               <div className="page-details">
                 {/* Memo pages only expose search tags; notes keep all three panels. */}
                 {!selectedIsMemo && (
@@ -2537,7 +2902,7 @@ function ProjectDetail({
               </div>
             </article>
           ) : (
-            <div className="project-landing-surface">
+            <div className="project-landing-surface project-overview-layout">
               <div className="landing-card">
                 <span className="landing-emoji" role="img" aria-label="emoji">
                   {project.emoji}
@@ -2570,6 +2935,45 @@ function ProjectDetail({
                   </button>
                 </div>
               </div>
+              <section className="combined-script-panel" aria-label="통합 대본">
+                <div className="combined-script-head">
+                  <div>
+                    <p className="kicker">통합 대본</p>
+                    <h2>{project.name}</h2>
+                  </div>
+                  <div className="combined-script-meta">
+                    <span>{combinedNotes.length}개 노트</span>
+                    <button
+                      className="btn subtle"
+                      type="button"
+                      title="통합 대본을 PDF로 내보내기 (인쇄 대화상자)"
+                      disabled={!combinedNotes.length}
+                      onClick={() => printProject(project, new Set(combinedNotes.map((item) => item.page.id)))}
+                    >
+                      <FileDown size={15} /> PDF
+                    </button>
+                    <button
+                      className="btn subtle"
+                      type="button"
+                      title="통합 대본 전체 텍스트 복사"
+                      disabled={!combinedNotes.length}
+                      onClick={copyCombinedScript}
+                    >
+                      <Copy size={15} /> {combinedCopied ? "복사됨" : "복사"}
+                    </button>
+                  </div>
+                </div>
+                <div className="combined-script-body">
+                  {combinedNotes.map((item) => (
+                    <article key={item.page.id} className="combined-script-note">
+                      <p className="combined-script-number">{combinedLabel(item.page)}</p>
+                      <h3>{item.page.title || "제목 없는 노트"}</h3>
+                      <p>{richTextPlain(item.page.script).trim() || "원고 없음"}</p>
+                    </article>
+                  ))}
+                  {!combinedNotes.length && <p className="hint">등록된 노트가 없습니다.</p>}
+                </div>
+              </section>
             </div>
           )}
         </section>
@@ -2798,7 +3202,17 @@ function SettingsView({
   onSettingsChange: (settings: UISettings | ((settings: UISettings) => UISettings)) => void;
 }) {
   type SettingsTab = "theme" | "design";
-  type DesignPart = "nav" | "category" | "noteTitle" | "noteContent" | "memo" | "link" | "tag";
+  type DesignPart =
+    | "nav"
+    | "category"
+    | "noteTitle"
+    | "pageNum"
+    | "noteContent"
+    | "combinedTitle"
+    | "combinedContent"
+    | "memo"
+    | "link"
+    | "tag";
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("design");
   const [designPart, setDesignPart] = useState<DesignPart>("nav");
   const fontOptions = ["Pretendard", "Arial", "Georgia", "Times New Roman", "Courier New"];
@@ -2809,12 +3223,11 @@ function SettingsView({
     fontKey: keyof UISettings;
     sizeKey: keyof UISettings;
     colorKey: keyof UISettings;
-    backgroundKey?: keyof UISettings;
   }> = [
     {
       id: "nav",
       label: "네비게이션 바",
-      description: "제일 좌측 앱 이동 메뉴의 글꼴과 색상입니다.",
+      description: "좌측 사이드바의 프로젝트 이름 행과 버튼입니다.",
       fontKey: "navFontFamily",
       sizeKey: "navTextSize",
       colorKey: "navTextColor"
@@ -2822,7 +3235,7 @@ function SettingsView({
     {
       id: "category",
       label: "카테고리",
-      description: "두 번째 네비게이션의 구획/폴더 제목입니다.",
+      description: "좌측 트리의 섹션(폴더) 제목입니다.",
       fontKey: "categoryFontFamily",
       sizeKey: "categoryTextSize",
       colorKey: "categoryTextColor"
@@ -2830,11 +3243,18 @@ function SettingsView({
     {
       id: "noteTitle",
       label: "노트제목",
-      description: "구획 안에 들어가는 노트 제목 목록입니다.",
+      description: "좌측 트리의 노트 제목 행입니다.",
       fontKey: "noteTitleFontFamily",
       sizeKey: "noteTitleTextSize",
-      colorKey: "noteTitleTextColor",
-      backgroundKey: "noteBackgroundColor"
+      colorKey: "noteTitleTextColor"
+    },
+    {
+      id: "pageNum",
+      label: "페이지 번호",
+      description: "좌측 트리 노트 행의 P.1, P.2 번호입니다.",
+      fontKey: "pageNumFontFamily",
+      sizeKey: "pageNumTextSize",
+      colorKey: "pageNumTextColor"
     },
     {
       id: "noteContent",
@@ -2845,13 +3265,28 @@ function SettingsView({
       colorKey: "noteContentTextColor"
     },
     {
+      id: "combinedTitle",
+      label: "통합대본 제목",
+      description: "프로젝트 화면 우측 통합 대본의 노트 제목입니다.",
+      fontKey: "combinedTitleFontFamily",
+      sizeKey: "combinedTitleTextSize",
+      colorKey: "combinedTitleTextColor"
+    },
+    {
+      id: "combinedContent",
+      label: "통합대본 내용",
+      description: "통합 대본의 본문 내용입니다.",
+      fontKey: "combinedContentFontFamily",
+      sizeKey: "combinedContentTextSize",
+      colorKey: "combinedContentTextColor"
+    },
+    {
       id: "memo",
       label: "메모",
-      description: "노트 하단 메모 행의 글자와 배경입니다.",
+      description: "노트 하단 메모 행의 글자입니다.",
       fontKey: "memoFontFamily",
       sizeKey: "memoTextSize",
-      colorKey: "memoTextColor",
-      backgroundKey: "memoBackgroundColor"
+      colorKey: "memoTextColor"
     },
     {
       id: "link",
@@ -2969,8 +3404,8 @@ function SettingsView({
               <input
                 className="range"
                 type="range"
-                min={activePart.id === "noteContent" ? "18" : "12"}
-                max={activePart.id === "noteContent" ? "36" : "30"}
+                min={activePart.id === "noteContent" ? "18" : activePart.id === "pageNum" ? "8" : "12"}
+                max={activePart.id === "noteContent" ? "36" : activePart.id === "pageNum" ? "20" : "30"}
                 value={sizeValue}
                 onChange={(event) =>
                   update({ [activePart.sizeKey]: Number(event.target.value) } as Partial<UISettings>)
@@ -2989,22 +3424,6 @@ function SettingsView({
                 onChange={(event) => update({ [activePart.colorKey]: event.target.value } as Partial<UISettings>)}
               />
             </label>
-            {activePart.backgroundKey && (
-              <label className="setting-row">
-                <div>
-                  <strong>배경 색상</strong>
-                  <span>{String(settings[activePart.backgroundKey])}</span>
-                </div>
-                <input
-                  className="color-input"
-                  type="color"
-                  value={String(settings[activePart.backgroundKey])}
-                  onChange={(event) =>
-                    update({ [activePart.backgroundKey as keyof UISettings]: event.target.value } as Partial<UISettings>)
-                  }
-                />
-              </label>
-            )}
             <button className="btn" onClick={() => onSettingsChange(defaultUISettings)}>
               기본값으로 복원
             </button>

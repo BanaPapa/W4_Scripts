@@ -1,5 +1,8 @@
 
 .env.local
+.env.local.cloud-backup
+# 컨벡스 데이터 스냅샷 (export/import로 PC 간 이동용) — 원고 데이터라 커밋 금지
+backups/
 node_modules/
 dist/
 .gstack/

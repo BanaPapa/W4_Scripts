@@ -18,6 +18,8 @@ export interface ScriptPage {
   // Whether this page is a memo (excluded from page numbering and export counts).
   // Optional: absent means a regular note.
   isMemo?: boolean;
+  // 갑지(PPT 타이틀 페이지) 여부. 페이지 번호 매기기에서 제외된다.
+  isCover?: boolean;
 }
 
 export interface ScriptSection {
