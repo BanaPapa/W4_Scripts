@@ -47,7 +47,7 @@ import {
   scopePageIds
 } from "./utils";
 import type { ExportScope } from "./utils";
-import { mergeRichText, richTextPlain } from "./richText";
+import { mergeRichText, richTextPlain, isRichText, encodeRichText, richTextHtml } from "./richText";
 import { RichTextEditor } from "./editor/RichTextEditor";
 
 /** Sections with an empty title are implicit containers: their notes render
@@ -257,6 +257,7 @@ interface UISettings {
   tagFontFamily: string;
   tagTextSize: number;
   tagTextColor: string;
+  projectFontSizes: Record<string, number>;
 }
 
 const defaultUISettings: UISettings = {
@@ -292,7 +293,8 @@ const defaultUISettings: UISettings = {
   linkTextColor: "#667085",
   tagFontFamily: "Pretendard",
   tagTextSize: 16,
-  tagTextColor: "#667085"
+  tagTextColor: "#667085",
+  projectFontSizes: {}
 };
 
 const SIDEBAR_MIN_WIDTH = 196;
@@ -446,6 +448,7 @@ export default function App() {
   const updateMetaMutation = useMutation(api.projects.updateMeta);
   const toggleFavoriteMutation = useMutation(api.projects.toggleFavorite);
   const removeProjectMutation = useMutation(api.projects.remove);
+  const duplicateProjectMutation = useMutation(api.projects.duplicate);
   const restoreProjectMutation = useMutation(api.projects.restore);
   const permanentlyDeleteProjectMutation = useMutation(api.projects.permanentlyDelete);
   // Optimistic updates keep typing responsive: without them every keystroke
@@ -795,6 +798,11 @@ export default function App() {
     removeProjectMutation({ id });
   }
 
+  async function handleDuplicateProject(id: Id<"projects">) {
+    const newId = await duplicateProjectMutation({ id });
+    if (newId) openProject(newId);
+  }
+
   function handleRestoreProject(id: Id<"projects">) {
     restoreProjectMutation({ id });
   }
@@ -823,6 +831,7 @@ export default function App() {
 
   const themedColor = (value: string, lightDefault: string, darkDefault: string) =>
     uiSettings.theme === "dark" && value.toLowerCase() === lightDefault.toLowerCase() ? darkDefault : value;
+
 
   const appStyle = {
     "--sidebar-width": `${uiSettings.navCollapsed ? 72 : uiSettings.sidebarWidth}px`,
@@ -925,6 +934,7 @@ export default function App() {
         onMoveProject={handleMoveProject}
         onRenameProject={handleRenameProject}
         onDeleteProject={handleDeleteProject}
+        onDuplicateProject={handleDuplicateProject}
         onQuickCreateProject={quickCreateProject}
         onAddNote={addNoteToProject}
         onEmojiChange={handleEmojiChange}
@@ -994,16 +1004,28 @@ export default function App() {
             mode={mode}
           />
         )}
-        {view === "project" && (
-          <ProjectDetail
-            project={activeProject}
-            selectedPageId={selectedPageId}
-            onUpdateProject={(updater) => updateProject(activeProject.id, updater)}
-            onNavigate={setView}
-            onAddPage={addPage}
-            onExport={() => setExportTarget(activeProject)}
-          />
-        )}
+        {view === "project" && (() => {
+          const projectFontSize = uiSettings.projectFontSizes?.[activeProject.id];
+          const contentStyle = projectFontSize
+            ? ({ "--note-content-text-size": `${projectFontSize}px` } as CSSProperties)
+            : undefined;
+          const wrapStyle: CSSProperties = {
+            display: "contents",
+            ...contentStyle
+          };
+          return (
+            <div style={wrapStyle}>
+              <ProjectDetail
+                project={activeProject}
+                selectedPageId={selectedPageId}
+                onUpdateProject={(updater) => updateProject(activeProject.id, updater)}
+                onNavigate={setView}
+                onAddPage={addPage}
+                onExport={() => setExportTarget(activeProject)}
+              />
+            </div>
+          );
+        })()}
         {view === "memos" && (
           <MemosView
             project={activeProject}
@@ -1045,6 +1067,25 @@ export default function App() {
   );
 }
 
+/** style 속성 문자열에서 font-size 선언을 제거한다. */
+function removeFontSizeFromStyle(style: string): string {
+  return style.replace(/font-size\s*:[^;]+;?\s*/gi, "").trim().replace(/^;+|;+$/g, "").trim();
+}
+
+/** 리치 텍스트 HTML 내 모든 인라인 font-size를 targetPx로 교체한다.
+ *  font-size가 없는 요소에는 span을 씌우지 않고 CSS 변수로 처리되므로 건드리지 않는다.
+ *  font-size가 있는 span이 비어 style이 되면 style 속성 자체를 제거한다. */
+function applyFontSizeToContent(content: string, targetPx: number): string {
+  if (!content) return content;
+  const html = isRichText(content) ? richTextHtml(content) : content;
+  const replaced = html.replace(/style="([^"]*)"/g, (_match, styleValue: string) => {
+    if (!/font-size/i.test(styleValue)) return `style="${styleValue}"`;
+    const newStyle = `font-size: ${targetPx}px; ${removeFontSizeFromStyle(styleValue)}`.trim().replace(/;\s*$/, "");
+    return `style="${newStyle}"`;
+  });
+  return isRichText(content) ? encodeRichText(replaced) : replaced;
+}
+
 function ConfirmModal({
   title,
   message,
@@ -1083,6 +1124,72 @@ function ConfirmModal({
           </button>
           <button type="button" className="btn danger" onClick={onConfirm} autoFocus>
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectFontSizeModal({
+  projectName,
+  currentSize,
+  onConfirm,
+  onClose
+}: {
+  projectName: string;
+  currentSize: number;
+  onConfirm: (size: number) => void;
+  onClose: () => void;
+}) {
+  const [size, setSize] = useState(currentSize);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
+      if (event.key === "Enter") onConfirm(size);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose, onConfirm, size]);
+
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={onClose}>
+      <div
+        className="modal confirm-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="노트 글씨 크기 조정"
+        onMouseDown={(event) => event.stopPropagation()}
+        style={{ minWidth: 320 }}
+      >
+        <h2>노트 글씨 크기</h2>
+        <p className="confirm-message" style={{ marginBottom: 16 }}>
+          <strong>{projectName}</strong>의 기본 노트 내용 글씨 크기를 설정합니다.
+        </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+          <input
+            className="range"
+            type="range"
+            min="14"
+            max="48"
+            step="1"
+            value={size}
+            onChange={(event) => setSize(Number(event.target.value))}
+            style={{ flex: 1 }}
+            autoFocus
+          />
+          <span style={{ minWidth: 48, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{size}px</span>
+        </div>
+        <div style={{ fontSize: size, lineHeight: 1.5, padding: "8px 12px", background: "var(--surface-2)", borderRadius: 6, marginBottom: 20, color: "var(--fg)" }}>
+          미리보기 텍스트입니다.
+        </div>
+        <div className="modal-actions">
+          <button type="button" className="btn" onClick={onClose}>
+            취소
+          </button>
+          <button type="button" className="btn" style={{ background: "var(--accent)", color: "#fff" }} onClick={() => onConfirm(size)}>
+            적용
           </button>
         </div>
       </div>
@@ -1957,6 +2064,7 @@ function Sidebar({
   onMoveProject,
   onRenameProject,
   onDeleteProject,
+  onDuplicateProject,
   onQuickCreateProject,
   onAddNote,
   onEmojiChange,
@@ -1982,6 +2090,7 @@ function Sidebar({
   onMoveProject: (orderedIds: Id<"projects">[]) => void;
   onRenameProject: (projectId: Id<"projects">, name: string) => void;
   onDeleteProject: (projectId: Id<"projects">) => void;
+  onDuplicateProject: (projectId: Id<"projects">) => void;
   onQuickCreateProject: () => void;
   onAddNote: (projectId: Id<"projects">) => void;
   onEmojiChange: (projectId: Id<"projects">, emoji: string) => void;
@@ -1993,6 +2102,7 @@ function Sidebar({
   const [drop, setDrop] = useState<{ id: Id<"projects">; mode: DropMode } | null>(null);
   const [contextMenu, setContextMenu] = useState<{ id: Id<"projects">; x: number; y: number } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Project | null>(null);
+  const [fontSizeModal, setFontSizeModal] = useState<{ projectId: Id<"projects">; projectName: string } | null>(null);
 
   useEffect(() => {
     if (!contextMenu) return undefined;
@@ -2175,30 +2285,12 @@ function Sidebar({
                   role="menuitem"
                   className="context-menu-item"
                   onClick={() => {
-                    onUpdateProject(target.id, (proj) => ({
-                      ...proj,
-                      sections: moveMemoSectionsToEnd([
-                        ...proj.sections,
-                        { id: uid("section"), title: "새 섹션", collapsed: false, pages: [] }
-                      ])
-                    }));
+                    onDuplicateProject(target.id);
                     setContextMenu(null);
                   }}
                 >
-                  <Plus size={14} />
-                  섹션 추가
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className="context-menu-item"
-                  onClick={() => {
-                    onRenameProject(target.id, window.prompt("프로젝트 이름", target.name) || target.name);
-                    setContextMenu(null);
-                  }}
-                >
-                  <Pencil size={14} />
-                  이름 변경
+                  <Copy size={14} />
+                  프로젝트 복제
                 </button>
                 <button
                   type="button"
@@ -2212,6 +2304,18 @@ function Sidebar({
                   <Download size={14} />
                   내보내기
                 </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="context-menu-item"
+                  onClick={() => {
+                    setContextMenu(null);
+                    setFontSizeModal({ projectId: target.id, projectName: target.name });
+                  }}
+                >
+                  <span style={{ fontSize: 14, lineHeight: 1 }}>가</span>
+                  글씨 크기 조정
+                </button>
                 <button type="button" role="menuitem" className="context-menu-item danger" onClick={() => deleteFromMenu(target)}>
                   <Trash2 size={14} />
                   삭제
@@ -2220,6 +2324,36 @@ function Sidebar({
             </div>
           );
         })()}
+      {fontSizeModal && (() => {
+        const defaultSize = settings.noteContentTextSize ?? 23;
+        const currentSize = settings.projectFontSizes?.[fontSizeModal.projectId] ?? defaultSize;
+        return (
+          <ProjectFontSizeModal
+            projectName={fontSizeModal.projectName}
+            currentSize={currentSize}
+            onConfirm={(size) => {
+              // 1) 프로젝트별 CSS 변수 저장
+              onSettingsChange((current) => ({
+                ...current,
+                projectFontSizes: { ...current.projectFontSizes, [fontSizeModal.projectId]: size }
+              }));
+              // 2) 해당 프로젝트의 모든 노트 HTML 내 font-size를 일괄 교체
+              onUpdateProject(fontSizeModal.projectId, (proj) => ({
+                ...proj,
+                sections: proj.sections.map((section) => ({
+                  ...section,
+                  pages: section.pages.map((page) => ({
+                    ...page,
+                    script: applyFontSizeToContent(page.script, size)
+                  }))
+                }))
+              }));
+              setFontSizeModal(null);
+            }}
+            onClose={() => setFontSizeModal(null)}
+          />
+        );
+      })()}
       {confirmDelete && (
         <ConfirmModal
           title="항목 삭제"
@@ -2692,11 +2826,18 @@ function ProjectDetail({
   onAddPage: (sectionId?: string) => void;
   onExport: () => void;
 }) {
-  const [detailOpen, setDetailOpen] = useState({ memo: false, links: false, tags: false });
+  const [detailOpen, setDetailOpen] = useState({ memo: true, links: false, tags: false });
   const [tagDraft, setTagDraft] = useState("");
   const [memoColumnWidths, setMemoColumnWidths] = useState<number[]>([]);
   const [memoViewCount, setMemoViewCount] = useState(1);
   const memoColumnsRef = useRef<HTMLDivElement | null>(null);
+  const noteSplitContainerRef = useRef<HTMLDivElement | null>(null);
+  const [noteSplitRightPct, setNoteSplitRightPct] = useState<number>(() => {
+    try {
+      const stored = Number(window.localStorage.getItem("pt-note-split-right-pct"));
+      return Number.isFinite(stored) && stored >= 15 ? stored : 28;
+    } catch { return 28; }
+  });
   const flatPages = flattenPages(project);
   const selected = selectedPageId ? flatPages.find((item) => item.page.id === selectedPageId) : undefined;
   const selectedPage = selected?.page;
@@ -2716,6 +2857,28 @@ function ProjectDetail({
 
   function toggleDetail(key: keyof typeof detailOpen) {
     setDetailOpen((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function startNoteSplitResize(event: React.PointerEvent<HTMLDivElement>) {
+    const container = noteSplitContainerRef.current;
+    if (!container) return;
+    const startX = event.clientX;
+    const startRightPct = noteSplitRightPct;
+    const totalWidth = container.getBoundingClientRect().width;
+    let finalPct = startRightPct;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const onMove = (e: PointerEvent) => {
+      if (totalWidth <= 0) return;
+      finalPct = Math.max(15, Math.min(55, startRightPct + ((startX - e.clientX) / totalWidth) * 100));
+      setNoteSplitRightPct(finalPct);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      try { window.localStorage.setItem("pt-note-split-right-pct", String(finalPct)); } catch {}
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp, { once: true });
   }
 
   function updateReferenceLink(index: number, value: string) {
@@ -2867,7 +3030,7 @@ function ProjectDetail({
       <div className="project-workspace">
         <section className="editor-pane">
           {selectedPage ? (
-            <article className="editor-surface">
+            <article className={`editor-surface${selectedIsMemo ? "" : " note-page"}`}>
               <div className="editor-head">
                 <input
                   className="title-input"
@@ -2918,7 +3081,7 @@ function ProjectDetail({
                   >
                     {memoPageColumns.map((column, index) => (
                       <Fragment key={index}>
-                        <label className="memo-column">
+                        <div className="memo-column">
                           <span>메모 {index + 1}</span>
                           <RichTextEditor
                             className={`script-editor memo-page-column ${memoPageColumns.length === 1 ? `memo-view-columns-${memoViewCount}` : ""}`}
@@ -2926,7 +3089,7 @@ function ProjectDetail({
                             onChange={(value) => updateMemoPageColumn(index, value)}
                             ariaLabel={`메모 ${index + 1}`}
                           />
-                        </label>
+                        </div>
                         {index < memoPageColumns.length - 1 && (
                           <div
                             className="memo-split-resizer"
@@ -2941,160 +3104,165 @@ function ProjectDetail({
                   </div>
                 </div>
               ) : (
-                <RichTextEditor
-                  className="script-editor"
-                  value={selectedPage.script}
-                  onChange={(value) => updateSelectedPage({ script: value })}
-                  ariaLabel="발표 원고"
-                />
-              )}
-              <div className="page-details">
-                {/* Memo pages only expose search tags; notes keep all three panels. */}
-                {!selectedIsMemo && (
-                <section className="detail-section">
-                  <button className="detail-summary" onClick={() => toggleDetail("memo")}>
-                    <ChevronDown size={16} className={detailOpen.memo ? "" : "rotated"} />
-                    <strong>노트 메모</strong>
-                    <span>{selectedPage.memo.trim() ? "메모 있음" : "접어둘 수 있는 짧은 메모"}</span>
-                  </button>
-                  {detailOpen.memo && (
-                    <div className="detail-body">
-                      <textarea
-                        className="memo-input"
-                        value={selectedPage.memo}
-                        onChange={(event) => updateSelectedPage({ memo: event.target.value })}
-                        placeholder="짧은 주의점, 질문 대비, 발표 피드백"
-                      />
-                    </div>
-                  )}
-                </section>
-                )}
-
-                {!selectedIsMemo && (
-                <section className="detail-section">
-                  <button className="detail-summary" onClick={() => toggleDetail("links")}>
-                    <ChevronDown size={16} className={detailOpen.links ? "" : "rotated"} />
-                    <strong>참고 링크</strong>
-                    <span>{(selectedPage.referenceLinks ?? []).filter(Boolean).length}개 링크</span>
-                  </button>
-                  {detailOpen.links && (
-                    <div className="detail-body links-editor">
-                      {(selectedPage.referenceLinks ?? []).map((link, index) => (
-                        <div className="link-row" key={`${selectedPage.id}-link-${index}`}>
-                          <input
-                            value={link}
-                            onChange={(event) => updateReferenceLink(index, event.target.value)}
-                            placeholder="https://example.com/reference"
-                          />
-                          <button className="mini-icon danger" onClick={() => removeReferenceLink(index)} aria-label="참고 링크 삭제">
-                            <Trash2 size={15} />
-                          </button>
-                        </div>
-                      ))}
-                      <button className="btn subtle add-link-btn" onClick={addReferenceLink}>
-                        <Plus size={16} />
-                        링크 추가
+                <div
+                  ref={noteSplitContainerRef}
+                  className="note-split-pane"
+                  style={{ gridTemplateColumns: `minmax(0, 1fr) 6px ${noteSplitRightPct}%` }}
+                >
+                  <div className="note-editor-left">
+                    <RichTextEditor
+                      className="script-editor"
+                      value={selectedPage.script}
+                      onChange={(value) => updateSelectedPage({ script: value })}
+                      ariaLabel="발표 원고"
+                    />
+                  </div>
+                  <div
+                    className="note-split-resizer"
+                    role="separator"
+                    aria-orientation="vertical"
+                    aria-label="노트 / 패널 너비 조절"
+                    onPointerDown={startNoteSplitResize}
+                  />
+                  <div className="note-sidebar-right">
+                    <section className={`note-panel${detailOpen.memo ? " expanded" : ""}`}>
+                      <button className="detail-summary" onClick={() => toggleDetail("memo")}>
+                        <ChevronDown size={16} className={detailOpen.memo ? "" : "rotated"} />
+                        <strong>자료조사</strong>
+                        <span>{selectedPage.memo.trim() ? "내용 있음" : "메모·자료"}</span>
                       </button>
-                    </div>
-                  )}
-                </section>
-                )}
-
-                <section className="detail-section">
-                  <button className="detail-summary" onClick={() => toggleDetail("tags")}>
-                    <ChevronDown size={16} className={detailOpen.tags ? "" : "rotated"} />
-                    <strong>검색 태그</strong>
-                    <span>{(selectedPage.tags ?? []).length}개 태그</span>
-                  </button>
-                  {detailOpen.tags && (
-                    <div className="detail-body tag-editor">
-                      <input
-                        value={tagDraft}
-                        onChange={(event) => setTagDraft(event.target.value)}
-                        onKeyDown={(event) => {
-                          if (event.key !== "Enter") return;
-                          event.preventDefault();
-                          addTagFromDraft();
-                        }}
-                        placeholder="단어 입력 후 Enter"
-                      />
-                      {(selectedPage.tags ?? []).length > 0 && (
-                        <div className="tag-list">
-                          {(selectedPage.tags ?? []).map((tag) => (
-                            <span key={tag}>
-                              {tag}
-                              <button onClick={() => removeTag(tag)} aria-label={`${tag} 태그 삭제`}>
-                                x
-                              </button>
-                            </span>
-                          ))}
+                      {detailOpen.memo && (
+                        <div className="note-panel-body">
+                          <textarea
+                            className="memo-input note-panel-textarea"
+                            value={selectedPage.memo}
+                            onChange={(event) => updateSelectedPage({ memo: event.target.value })}
+                            placeholder="짧은 주의점, 질문 대비, 발표 피드백"
+                          />
                         </div>
                       )}
-                    </div>
-                  )}
-                </section>
-              </div>
+                    </section>
+
+                    <section className={`note-panel${detailOpen.links ? " expanded" : ""}`}>
+                      <button className="detail-summary" onClick={() => toggleDetail("links")}>
+                        <ChevronDown size={16} className={detailOpen.links ? "" : "rotated"} />
+                        <strong>참고 링크</strong>
+                        <span>{(selectedPage.referenceLinks ?? []).filter(Boolean).length}개 링크</span>
+                      </button>
+                      {detailOpen.links && (
+                        <div className="note-panel-body">
+                          {(selectedPage.referenceLinks ?? []).map((link, index) => (
+                            <div className="link-row" key={`${selectedPage.id}-link-${index}`}>
+                              <input
+                                value={link}
+                                onChange={(event) => updateReferenceLink(index, event.target.value)}
+                                placeholder="https://example.com/reference"
+                              />
+                              <button className="mini-icon danger" onClick={() => removeReferenceLink(index)} aria-label="참고 링크 삭제">
+                                <Trash2 size={15} />
+                              </button>
+                            </div>
+                          ))}
+                          <button className="btn subtle add-link-btn" onClick={addReferenceLink}>
+                            <Plus size={16} />
+                            링크 추가
+                          </button>
+                        </div>
+                      )}
+                    </section>
+
+                    <section className={`note-panel${detailOpen.tags ? " expanded" : ""}`}>
+                      <button className="detail-summary" onClick={() => toggleDetail("tags")}>
+                        <ChevronDown size={16} className={detailOpen.tags ? "" : "rotated"} />
+                        <strong>검색 태그</strong>
+                        <span>{(selectedPage.tags ?? []).length}개 태그</span>
+                      </button>
+                      {detailOpen.tags && (
+                        <div className="note-panel-body">
+                          <input
+                            value={tagDraft}
+                            onChange={(event) => setTagDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key !== "Enter") return;
+                              event.preventDefault();
+                              addTagFromDraft();
+                            }}
+                            placeholder="단어 입력 후 Enter"
+                          />
+                          {(selectedPage.tags ?? []).length > 0 && (
+                            <div className="tag-list">
+                              {(selectedPage.tags ?? []).map((tag) => (
+                                <span key={tag}>
+                                  {tag}
+                                  <button onClick={() => removeTag(tag)} aria-label={`${tag} 태그 삭제`}>
+                                    x
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </section>
+                  </div>
+                </div>
+              )}
             </article>
           ) : (
-            <div className="project-landing-surface project-overview-layout">
-              <div className="landing-card">
-                <span className="landing-emoji" role="img" aria-label="emoji">
-                  {project.emoji}
-                </span>
-                <h2>{project.name}</h2>
-                {project.siteName && <p className="landing-site-name">{project.siteName}</p>}
-
-                <div className="landing-divider" />
-
-                <div className="landing-stats">
-                  <div className="landing-stat-item">
-                    <span className="stat-value">{countNotes(project)}개</span>
-                    <span className="stat-label">등록된 노트</span>
-                  </div>
-                  <div className="landing-stat-item">
-                    <span className="stat-value">{formatDuration(totalSeconds)}</span>
-                    <span className="stat-label">예상 발표 시간</span>
-                  </div>
-                </div>
-
-                <div className="landing-actions">
-                  <button className="btn primary landing-btn" onClick={() => onAddPage()}>
-                    <Plus size={16} /> 새 노트 추가하기
-                  </button>
-                  <button className="btn subtle landing-btn" onClick={() => onNavigate("memos")}>
-                    <Pin size={16} /> 프로젝트 메모
-                  </button>
-                  <button className="btn subtle landing-btn" onClick={onExport}>
-                    <Download size={16} /> 내보내기
-                  </button>
-                </div>
-              </div>
+            <div className="project-overview-full">
               <section className="combined-script-panel" aria-label="통합 대본">
                 <div className="combined-script-head">
-                  <div>
-                    <p className="kicker">통합 대본</p>
-                    <h2>{project.name}</h2>
+                  <div className="combined-head-info">
+                    <div className="combined-head-title">
+                      <span className="combined-emoji" role="img" aria-label="emoji">
+                        {project.emoji}
+                      </span>
+                      <div>
+                        <p className="kicker">통합 대본</p>
+                        <h2>{project.name}</h2>
+                      </div>
+                    </div>
+                    {project.siteName && <p className="combined-site-name">{project.siteName}</p>}
                   </div>
-                  <div className="combined-script-meta">
-                    <span>{combinedNotes.length}개 노트</span>
-                    <button
-                      className="btn subtle"
-                      type="button"
-                      title="통합 대본을 PDF로 내보내기 (인쇄 대화상자)"
-                      disabled={!combinedNotes.length}
-                      onClick={() => printProject(project, new Set(combinedNotes.map((item) => item.page.id)))}
-                    >
-                      <FileDown size={15} /> PDF
-                    </button>
-                    <button
-                      className="btn subtle"
-                      type="button"
-                      title="통합 대본 전체 텍스트 복사"
-                      disabled={!combinedNotes.length}
-                      onClick={copyCombinedScript}
-                    >
-                      <Copy size={15} /> {combinedCopied ? "복사됨" : "복사"}
-                    </button>
+                  <div className="combined-head-right">
+                    <div className="combined-script-stats">
+                      <span>{combinedNotes.length}개 노트</span>
+                      {totalSeconds > 0 && (
+                        <span className="pt-time-badge">
+                          <Presentation size={14} />
+                          PT {formatDuration(totalSeconds)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="combined-head-actions">
+                      <button className="btn primary" onClick={() => onAddPage()}>
+                        <Plus size={15} /> 새 노트
+                      </button>
+                      <button className="btn subtle" onClick={() => onNavigate("memos")}>
+                        <Pin size={15} /> 메모
+                      </button>
+                      <button className="btn subtle" onClick={onExport}>
+                        <Download size={15} /> 내보내기
+                      </button>
+                      <button
+                        className="btn subtle"
+                        type="button"
+                        title="통합 대본을 PDF로 내보내기 (인쇄 대화상자)"
+                        disabled={!combinedNotes.length}
+                        onClick={() => printProject(project, new Set(combinedNotes.map((item) => item.page.id)))}
+                      >
+                        <FileDown size={15} /> PDF
+                      </button>
+                      <button
+                        className="btn subtle"
+                        type="button"
+                        title="통합 대본 전체 텍스트 복사"
+                        disabled={!combinedNotes.length}
+                        onClick={copyCombinedScript}
+                      >
+                        <Copy size={15} /> {combinedCopied ? "복사됨" : "복사"}
+                      </button>
+                    </div>
                   </div>
                 </div>
                 <div className="combined-script-body">

@@ -93,6 +93,39 @@ export const create = mutation({
   }
 });
 
+// Deep-clones a project (fresh ids for every section/page) so the copy is
+// fully independent from the source. Appended to the end of the active list.
+export const duplicate = mutation({
+  args: { id: v.id("projects") },
+  handler: async (ctx, { id }) => {
+    const source = await ctx.db.get(id);
+    if (!source) return null;
+    const active = await ctx.db
+      .query("projects")
+      .withIndex("by_deletedAt", (q) => q.eq("deletedAt", undefined))
+      .collect();
+    const order = active.reduce((max, project) => Math.max(max, project.order ?? 0), 0) + 1;
+    const sections = source.sections.map((section) => ({
+      ...section,
+      id: crypto.randomUUID(),
+      pages: section.pages.map((page) => ({ ...page, id: crypto.randomUUID() }))
+    }));
+
+    return await ctx.db.insert("projects", {
+      name: `${source.name} 복사본`,
+      siteName: source.siteName,
+      labelColor: source.labelColor,
+      emoji: source.emoji,
+      favorite: false,
+      updatedAt: new Date().toISOString(),
+      projectMemos: source.projectMemos,
+      sections,
+      kind: source.kind,
+      order
+    });
+  }
+});
+
 // Renumber top-level projects (0..n-1) after a drag reorder.
 export const reorderProjects = mutation({
   args: { orderedIds: v.array(v.id("projects")) },
